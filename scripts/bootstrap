@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+
+# Purpose:
+# Prepare fresh system for work.
+
+set -euxo pipefail
+
+install_or_update_zsh_plugin() {
+  if [ -d ~/.zsh/"${2}" ]; then
+    cd ~/.zsh/"${2}"
+    git pull
+    cd -
+    return
+  fi
+
+  git clone "${1}" "${HOME}/.zsh/${2}"
+}
+
+# Install Homebrew, see
+# https://docs.brew.sh/Installation
+eval "$(/opt/homebrew/bin/brew shellenv)"
+
+if command -v brew >/dev/null; then
+  echo "✅ brew installed"
+else
+  # Install [Homebrew](https://brew.sh/)
+  echo 'Initiate installing brew'
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+  brew cleanup --prune=all
+fi
+
+brew install bat # better cat
+
+# FVM - flutter version managaer
+brew tap leoafarias/fvm
+brew install fvm
+
+# Scripting
+brew install shellcheck
+
+# Administration
+brew install btop
+brew install coreutils
+brew install inetutils
+
+# Install NeoVim
+brew install nvim
+git config --global core.editor nvim
+
+# Install or update ZSH plugins.
+install_or_update_zsh_plugin https://github.com/MichaelAquilina/zsh-you-should-use.git zsh-you-should-use
+install_or_update_zsh_plugin https://github.com/zsh-users/zsh-syntax-highlighting.git zsh-syntax-highlighting
+install_or_update_zsh_plugin https://github.com/zsh-users/zsh-autosuggestions.git zsh-autosuggestions
+install_or_update_zsh_plugin https://github.com/fdellwing/zsh-bat.git zsh-bat
+install_or_update_zsh_plugin https://gist.github.com/5013acf2cd5b28e55036c82c91bd56d8.git adb-commands
+brew install zsh-syntax-highlighting
+
+# Tweak Finder
+defaults write NSGlobalDomain AppleShowAllExtensions -bool true
+defaults write com.apple.Finder AppleShowAllFiles -bool true
+defaults write com.apple.Finder NewWindowTarget -string "PfHm"
+defaults write com.apple.Finder NewWindowTargetPath -string "file:///Users/${USER}/"
+defaults write com.apple.Finder ShowStatusBar -bool false
+defaults write com.apple.Finder _FXShowPosixPathInTitle -bool true
+defaults write com.apple.finder FXEnableExtensionChangeWarning -bool false
+defaults write com.apple.finder ShowPathbar -bool true
+defaults write com.apple.finder _FXSortFoldersFirst -bool true
+killall Finder
+
+# Make it possible to repeat the same keypress many times by holding it down.
+defaults write NSGlobalDomain ApplePressAndHoldEnabled -bool false
+
+echo "Done!"
