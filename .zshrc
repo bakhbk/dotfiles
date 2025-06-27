@@ -6,9 +6,18 @@ setopt No_Beep
 
 # History parameters
 # It is recommended to keep SAVEHIST == HISTSIZE
-HISTSIZE=10000
-SAVEHIST=10000
+HISTSIZE=100000
+SAVEHIST=100000
 HISTFILE=~/.dotfiles/.zsh_history
+
+# Сохранять историю между сессиями
+setopt SHARE_HISTORY
+
+# Не дублировать команды в истории
+setopt HIST_IGNORE_DUPS
+
+# Сохранять время выполнения команд
+setopt EXTENDED_HISTORY
 
 # Each line is added to the history as it is executed
 setopt INC_APPEND_HISTORY
@@ -22,6 +31,48 @@ setopt HIST_REDUCE_BLANKS
 # Remove no needed spaces (e.g. trailing)
 setopt HIST_IGNORE_SPACE
 
+# Не сохранять команды, начинающиеся с пробела (полезно для паролей)
+setopt HIST_IGNORE_SPACE
+
+# Проверять команды истории перед выполнением
+setopt HIST_VERIFY
+
+# Не сохранять команду history в истории
+setopt HIST_NO_STORE
+
+# Не выполнять функцию history expansion сразу, позволить редактировать
+setopt HIST_VERIFY
+
+# Удалять старые дубликаты при достижении HISTSIZE
+setopt HIST_EXPIRE_DUPS_FIRST
+
+# Игнорировать некоторые часто используемые команды
+HISTORY_IGNORE="(ls|cd|pwd|exit|sudo reboot|history|cd -|cd ..)"
+
+# Функции для работы с историей
+# Поиск в истории с fzf (если установлен)
+function fh() {
+  print -z $( ([ -n "$ZSH_NAME" ] && fc -l 1 || history) | fzf +s --tac | sed -E 's/ *[0-9]*\*? *//' | sed -E 's/\\/\\\\/g')
+}
+
+# Очистка истории
+function clear_history() {
+    echo "Очищаю историю команд..."
+    echo "" > ~/.dotfiles/.zsh_history
+    fc -p ~/.dotfiles/.zsh_history
+    echo "История очищена!"
+}
+
+# Статистика по самым используемым командам
+function history_stats() {
+    fc -l 1 | awk '{CMD[$2]++;count++;}END { for (a in CMD)print CMD[a] " " CMD[a]/count*100 "% " a;}' | grep -v "./" | column -c3 -s " " -t | sort -nr | nl |  head -n20
+}
+
+# Поиск команды в истории
+function hist_grep() {
+    fc -l 1 | grep "$@"
+}
+
 # Expand PATH
 typeset -U path
 
@@ -30,6 +81,7 @@ source ~/.dotfiles/.zsh_aliases
 source ~/.dotfiles/.zsh_tools
 source ~/.dotfiles/.zshenv
 source ~/.dotfiles/.create_tmux_session.sh
+source ~/.dotfiles/.zsh_history_config
 if [ -f ~/work/.zshrc ]; then
   source ~/work/.zshrc
 fi

@@ -1,0 +1,99 @@
+# Дополнительные настройки истории для zsh
+# Этот файл содержит расширенные настройки для работы с историей команд
+
+# Алиасы для быстрого поиска в истории
+alias h='history'
+alias hgrep='history | grep'
+alias hs='history_stats'
+alias hf='fh'  # fuzzy history search
+
+# Горячие клавиши для работы с историей
+# Ctrl+R - интерактивный поиск в истории (если установлен fzf)
+if command -v fzf >/dev/null; then
+    bindkey '^R' fzf-history-widget
+fi
+
+# Настройка автодополнения истории
+# Включить автодополнение на основе истории
+setopt AUTO_LIST
+setopt AUTO_MENU
+setopt AUTO_PARAM_SLASH
+setopt AUTO_PARAM_KEYS
+
+# Улучшенная навигация по истории
+# Up/Down arrows для поиска в истории с учетом уже введенного текста
+autoload -U up-line-or-beginning-search
+autoload -U down-line-or-beginning-search
+zle -N up-line-or-beginning-search
+zle -N down-line-or-beginning-search
+bindkey "^[[A" up-line-or-beginning-search   # Up
+bindkey "^[[B" down-line-or-beginning-search # Down
+
+# Дополнительные полезные функции
+# Выполнить последнюю команду с sudo
+function sudo_last() {
+    sudo $(fc -ln -1)
+}
+alias sl='sudo_last'
+
+# Показать последние N команд
+function last_commands() {
+    local count=${1:-10}
+    fc -l -$count
+}
+alias lc='last_commands'
+
+# Экспорт истории в файл
+function export_history() {
+    local output_file=${1:-~/history_backup_$(date +%Y%m%d_%H%M%S).txt}
+    fc -l 1 > "$output_file"
+    echo "История экспортирована в: $output_file"
+}
+
+# Импорт истории из файла
+function import_history() {
+    local input_file=${1}
+    if [[ -z "$input_file" ]]; then
+        echo "Использование: import_history <файл>"
+        return 1
+    fi
+    
+    if [[ ! -f "$input_file" ]]; then
+        echo "Файл не найден: $input_file"
+        return 1
+    fi
+    
+    cat "$input_file" >> "$HISTFILE"
+    fc -R
+    echo "История импортирована из: $input_file"
+}
+
+# Поиск и выполнение команды из истории
+function execute_from_history() {
+    local cmd=$(fc -l 1 | fzf +s --tac | sed -E 's/ *[0-9]*\*? *//')
+    if [[ -n "$cmd" ]]; then
+        eval "$cmd"
+    fi
+}
+alias efh='execute_from_history'
+
+# Показать команды, выполненные в определенную дату
+function history_by_date() {
+    local date_pattern=${1:-$(date +%Y-%m-%d)}
+    fc -l 1 | grep "$date_pattern"
+}
+
+# Создать резервную копию истории
+function backup_history() {
+    local backup_dir=~/.dotfiles/history_backups
+    mkdir -p "$backup_dir"
+    local backup_file="$backup_dir/zsh_history_backup_$(date +%Y%m%d_%H%M%S)"
+    cp "$HISTFILE" "$backup_file"
+    echo "Резервная копия создана: $backup_file"
+}
+
+# Автоматическое создание резервной копии истории при запуске (раз в день)
+if [[ ! -f ~/.dotfiles/last_history_backup ]] || [[ $(find ~/.dotfiles/last_history_backup -mtime +1 2>/dev/null) ]]; then
+    backup_history >/dev/null 2>&1
+    touch ~/.dotfiles/last_history_backup
+fi
