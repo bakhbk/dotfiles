@@ -1,0 +1,6 @@
+# OS X trash
+.DS_Store
+
+# Vim swap files
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]

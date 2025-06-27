@@ -1,0 +1,145 @@
+# Purprose:
+# Aliases for zsh.
+# For a full list of active aliases, run `alias`.
+
+# Global aliases
+alias -g G='|grep'
+alias -g M='|more'
+alias -g N='2>/dev/null'
+alias -g J='-H "Content-Type: application/json"'
+alias -g S='-w "\n%{http_code}\n"'
+if [[ "$OSTYPE" = darwin* ]]; then
+    alias -g CB='| pbcopy'
+fi
+
+# Tools
+alias df='df -h'
+alias du='du -h'
+alias mkdir='mkdir -pv'
+alias reload-bash='source ~/.bashrc'
+alias reload-zsh='source ~/.zshrc'
+alias rmr='rm -rf'
+alias show-path='echo $PATH | tr -s ":" "\n"'
+
+if [ command -v bat &> /dev/null ]; then
+    alias cat='bat --theme=Nord --style=plain'
+fi
+
+if [[ "$OSTYPE" = darwin* ]]; then
+    alias grep='grep --color=always'
+    alias mc='LC_ALL=en_US.UTF8 mc'
+    alias myip="ipconfig getifaddr en0"
+else
+    alias aptget='sudo apt-get'
+    alias aptup='sudo apt-get update && sudo apt-get upgrade'
+    alias dnf='sudo dnf'
+    alias gdb='gdb --silent'
+    alias grep='grep --color=always'
+    alias ipconfig='ifconfig'
+    alias ips='ip -c -br address show'
+    alias ipt-list='iptables -vL --line-numbers'
+    alias ipt-watch='watch -n 2 -d iptables -nvL'
+    alias lscpu='lscpu -e'
+    alias meminfo='free -h -l'
+    alias mount='sudo mount | column -t'
+    alias ports='netstat -tulanp'
+    alias poweroff='sudo poweroff'
+    alias routes='ip -c -br route show'
+    alias reboot='sudo reboot'
+    alias shutdown='sudo /sbin/shutdown'
+    alias snap='sudo snap'
+    alias systemctl='sudo systemctl'
+    alias tree='tree -h'
+    alias umount='sudo umount'
+    alias update-grub='grub2-mkconfig -o "$(readlink -e /etc/grub2.cfg)"'
+    alias yum='sudo yum'
+fi
+
+# Common aliases
+alias c='clear'
+alias e='exit 0'
+alias emacs='emacs -nw'
+alias hosts='cat /etc/hosts'
+alias ll='ls -GlAhFk --color=auto'
+alias ls='ls -GFA --color=auto'
+alias wget='wget -c'
+alias studio='open -a /Applications/Android\ Studio.app'
+alias storm='open -a /Applications/WebStorm.app'
+
+# NPM aliases
+alias na='npm audit'
+alias ni='npm install --save'
+alias nid='npm install --save-dev'
+alias npm-reinstall='rm -rf node_modules && npm install'
+alias npm-update='sudo npm install -g npm'
+
+# Jest aliases
+alias ji='node_modules/.bin/jest -i'
+alias jt='node_modules/.bin/jest -t'
+alias jdb='node --inspect-brk node_modules/.bin/jest --runInBand'
+
+# Git aliases
+alias gi='grep ^alias.g ~/.zsh_aliases'
+alias ga='git add'
+alias gaa='git add .'
+alias gam='git am --3way --ignore-space-change'
+alias gb='git branch'
+alias gbd='git branch -D'
+alias gm='git blame -w -C -C -C'
+alias gc='git commit --signoff'
+alias gco='git checkout'
+alias gca='git commit --amend --date=now'
+alias gcan='git commit --amend --no-edit --date=now'
+alias gcp='git cherry-pick'
+alias gcpx='git cherry-pick -x'
+alias gd='git diff'
+alias gdc='git diff --cached'
+alias gf='git fetch --all'
+alias gl='git pull'
+alias glg='git log --color --graph --oneline --abbrev-commit --decorate --abbrev=8 --date=format-local:"%d-%m-%Y %H:%M:%S" --pretty=format:"%C(cyan)%h %C(yellow)%ad %C(bold green)%d %C(reset)%s <%C(bold blue)%an>"'
+alias glm='git log --no-merges --oneline'
+alias gp='git push'
+alias gpf='git push --force-with-lease'
+alias gpo='git push -u origin'
+alias gr='git rebase -i'
+alias gra='git rebase --abort'
+alias grc='git rebase --continue'
+alias gs='git status -sb'
+alias gst='git stash'
+alias gstl='git stash list'
+alias gstp='git stash pop'
+alias gsts='git stash show -p'
+alias g_del_loc_b='git branch | grep -v "main" | xargs git branch -D'
+
+# Docker
+alias di='docker images'
+alias dps='docker ps'
+alias dri='docker rmi'
+alias dr='docker run --rm -it --entrypoint /bin/bash'
+alias hadolint='hadolint -c ~/.hadolint.yaml'
+alias start-docker='open /Applications/Docker.app'
+
+# Python aliases
+alias activate='. ./.venv/bin/activate'
+
+# Flutter
+#alias flutter='fvm flutter'
+#alias dart='fvm dart'
+alias f='fvm flutter'
+alias d='fvm dart'
+alias fg='fvm flutter pub get' # get dependencies
+alias fcl='fvm flutter clean'
+alias fpa='fvm flutter pub add'
+alias fpad='fvm flutter pub add -d'
+alias fpup='fvm flutter pub upgrade'
+alias fcios='flutter precache --ios && rm -rf ios/.symlinks ios/Pods ios/Podfile.lock ios/Runner.xcworkspace && cd ios || exit && pod install --repo-update && cd - || exit'
+fbr () {
+    flutter build "$1" --release
+}
+
+# Show adb commands
+alias adbi="cat ~/.zsh/adb-commands/AdbCommands"
+source ~/.dotfiles/.git_checkout_branch.sh
+source ~/.dotfiles/.git_delete_branch.sh
+source ~/.dotfiles/.tmux_session_selector.sh
+source ~/.dotfiles/.nvmv.sh

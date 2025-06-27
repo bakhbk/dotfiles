@@ -1,0 +1,197 @@
+# Purprose:
+# Handy zsh commands and functions.
+
+
+# Create a new directory and enter it
+mkcd() {
+    mkdir -pv "$1" && cd "$1"
+}
+
+
+# Colored man pages
+man()
+{
+    env \
+    LESS_TERMCAP_mb=$(printf "\e[1;36m") \
+    LESS_TERMCAP_md=$(printf "\e[1;36m") \
+    LESS_TERMCAP_me=$(printf "\e[0m") \
+    LESS_TERMCAP_se=$(printf "\e[0m") \
+    LESS_TERMCAP_so=$(printf "\e[1;44;33m") \
+    LESS_TERMCAP_ue=$(printf "\e[0m") \
+    LESS_TERMCAP_us=$(printf "\e[1;32m") \
+    man "$@"
+}
+
+
+# Extracts archived files / mounts disk images
+# Usage: extract <file>
+# Credit: http://nparikh.org/notes/zshrc.txt
+extract () {
+    if [ -f $1 ]; then
+        case $1 in
+            *.tar.bz2)  tar -jxvf $1                        ;;
+            *.tar.gz)   tar -zxvf $1                        ;;
+            *.bz2)      bunzip2 $1                          ;;
+            *.dmg)      hdiutil mount $1                    ;;
+            *.gz)       gunzip $1                           ;;
+            *.tar)      tar -xvf $1                         ;;
+            *.tbz2)     tar -jxvf $1                        ;;
+            *.tgz)      tar -zxvf $1                        ;;
+            *.zip)      unzip $1                            ;;
+            *.ZIP)      unzip $1                            ;;
+            *.pax)      cat $1 | pax -r                     ;;
+            *.pax.Z)    uncompress $1 --stdout | pax -r     ;;
+            *.Z)        uncompress $1                       ;;
+            *)          echo "'$1' cannot be extracted/mounted via extract()" ;;
+        esac
+    else
+        echo "'$1' is not a valid file"
+    fi
+}
+
+
+# Generate new SSH key
+# Usage: sshcreate <key_name>
+sshcreate() {
+    if [ ! -z "$1" ];
+    then
+        ssh-keygen -f $HOME/.ssh/$1 -t ed25519 -N '' -C "$1"
+        chmod 600 $HOME/.ssh/$1
+        chmod 600 $HOME/.ssh/$1.pub
+    fi
+}
+
+# Get short info and hints about a command
+wtfis() {
+    curl "https://cheat.sh/$1"
+}
+
+
+# Get full list of ports opened in firewalld for registered services
+fports() {
+    for i in `sudo firewall-cmd --list-services`;
+    do
+        echo "\n$i:"
+        sudo firewall-cmd --permanent --service "$i" --get-ports;
+    done
+}
+
+# Create git branch from origin branch with the same name
+gcob() {
+    git checkout -b $1 origin/$1
+}
+
+# Cleans py[cod] and cache dirs in the current tree
+pyclean () {
+    find . \
+        | grep -E "(__pycache__|\.(mypy_)?cache|\.hypothesis\.py[cod]$)" \
+        | xargs rm -rf
+}
+
+# Clean intermediate Docker images names as none
+docker-clean() {
+    docker images | grep none | awk '{print $3}' | xargs docker rmi
+}
+
+if [[ "$OSTYPE" = linux* ]]; then
+
+# macOS-like convenient open
+open () {
+    if [ -f "$1" ]; then
+        case "$1" in
+            *.html)  firefox "$1" 2>/dev/null             ;;
+            *)       echo "'$1' cannot process with open" ;;
+        esac
+    else
+        echo "'$1' is not a valid file"
+    fi
+}
+
+fi
+
+# Clean any flutter project
+fclean() {
+  # Find all directories containing a pubspec.yaml file
+  find . -name "pubspec.yaml" -exec dirname {} \; | while read -r dir; do
+    # Construct the path to the build directory
+    build_dir="$dir/build"
+
+    # Check if the build directory exists
+    if [ -d "$build_dir" ]; then
+      echo "Removing build directory in $dir"
+      rm -rf "$build_dir"
+    fi
+  done
+}
+
+# Clean node_modules on react project
+rclean () {
+  # Find all directories containing a package.json file
+  find . -name "package.json" -exec dirname {} \; | while read -r dir; do
+    # Construct the path to the node_modules directory
+    node_modules_dir="$dir/node_modules"
+
+    # Check if the node_modules directory exists
+    if [ -d "$node_modules_dir" ]; then
+      echo "Removing node_modules directory in $dir"
+      rm -rf "$node_modules_dir"
+    fi
+  done
+}
+
+# ==========================
+# = Show all aliases start =  
+# ==========================
+_aliases="$(alias -Lr 2>/dev/null || alias)"
+
+alias_for() {
+  local alias_name="$1"
+  [[ -z "$alias_name" ]] && return 1
+
+  local found="$(echo "$_aliases" | sed -nE "/^alias\ ${alias_name}='?(.+)/s//\\1/p" )"
+  [[ -n "$found" ]] && echo "${found%\'}" || echo "Alias not found: $alias_name"
+}
+
+
+# Evaluate all the aliases
+# example
+# ```
+# shas | grep -E "^alias g"
+# ```
+shas(){
+    echo $_aliases
+}
+
+alias dfv="shas | grep -E"
+
+_showFlutterAliases () {
+    shshow "alias ([d|f]|dart|flutter)"
+}
+
+alias fli="_showFlutterAliases"
+# ==========================
+# = Show all aliases end   =  
+# ==========================
+
+
+# Password generator
+pwgen() {
+  local len=${1:-20}
+  LC_ALL=C tr -dc 'A-Za-z0-9@#%^&*()_+=-{}[]:;<>,.?/' < /dev/urandom | head -c "$len" | xargs echo
+}
+
+# Define the path to adb
+ADB_PATH="/Users/$(whoami)/Library/Android/sdk/platform-tools/adb"
+
+
+# Check if adb is already available (either in PATH or as an alias)
+if command -v adb &> /dev/null; then
+  #  echo "ADB is already available."
+else
+    # Check if adb exists at the specified path
+    if [ -f "$ADB_PATH" ]; then
+        # Create an alias for adb
+        alias adb="$ADB_PATH"
+        export PATH=$PATH:$ANDROID_HOME/platform-tools
+    fi
+fi

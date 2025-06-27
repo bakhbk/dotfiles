@@ -1,0 +1,68 @@
+[core]
+	autocrlf = input
+	editor = nvim
+	excludesfile = ~/.gitignore
+[fetch]
+	prune = true
+	fsckobjects = true
+[pull]
+	rebase = true
+[push]
+	default = simple
+	autoSetupRemote = true
+[alias]
+	db = !sh -c \"git branch -d ${1} && git push origin :${1}\" -
+	dt = !sh -c \"git tag -d ${1} && git push origin :${1}\" -
+	# NOTE : Declined pull requests couldn't be fetched from Bitbucket.
+	gpr = !sh -c \"git fetch upstream pull-requests/${1}/from:pr/${1} && git checkout pr/${1}\" -
+	sync = !sh -c \"git fetch upstream && git checkout master && git merge upstream/master\" -
+	authors = shortlog --all -sne
+	commits-by = !sh -c \"git log --all --author='${1}'\" -
+[diff]
+	algorithm = histogram
+	tool = difftastic
+	submodule = log
+[commit]
+	# NOTE: To generate a key do:
+	# $ gpg --list-keys
+	# $ gpg --gen-key
+	# $ gpg --list-secret-keys --keyid-format LONG
+	# The ID could be found in the very first string:
+	# sec rsa2048/<keyID> 2019-12-26
+	#
+	# $ git config --global user.signingkey <keyID>
+	#
+	# To export a key in ASCII format e.g. for Github do:
+	# $ gpg --armor --export <keyID>
+	# gpgsign = true
+[difftool]
+	prompt = false
+[rebase]
+	autoStash = true
+	updateRefs = true
+[rerere]
+	enabled = true
+	autoUpdate = true
+[filter "lfs"]
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
+	required = true
+[includeIf "gitdir:~/work/src/github.com/"]
+	path = ~/.gitconfig-oss
+[includeIf "gitdir:~/work/src/gitverse.ru/"]
+	path = ~/.gitconfig-oss
+[branch]
+	sort = -committerdate
+[merge]
+	conflictStyle = zdiff3
+[transfer]
+	fsckobjects = true
+[receive]
+	fsckObjects = true
+[status]
+	submoduleSummary = true
+[submodule]
+	recurse = true
+[init]
+	defaultBranch = main
