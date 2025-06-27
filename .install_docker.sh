@@ -1,5 +1,11 @@
 #!/bin/bash
 
+# if macOS return
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "This script is intended for Linux systems only."
+    exit 0
+fi
+
 # Установить Докер
 ## Обновить индекс пакета apt
 sudo apt-get update
