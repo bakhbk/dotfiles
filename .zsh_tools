@@ -163,6 +163,7 @@ shas(){
 }
 
 alias dfv="shas | grep -E"
+alias dfvv="shas | fzf"
 
 _showFlutterAliases () {
     shshow "alias ([d|f]|dart|flutter)"
