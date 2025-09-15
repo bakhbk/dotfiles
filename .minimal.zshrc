@@ -12,6 +12,7 @@ plugins=(
   you-should-use
   zsh-syntax-highlighting
   tmux
+  git-flow
 )
 export ZSH="$HOME/.oh-my-zsh"
 

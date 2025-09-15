@@ -111,34 +111,32 @@ alias gstp='git stash pop'
 alias gsts='git stash show -p'
 alias g_del_loc_b='git branch | grep -v "main" | xargs git branch -D'
 
-# Docker
+# Docker aliases (OrbStack)
+alias dc='docker compose'
+alias dcu='docker compose up'
+alias dcd='docker compose down'
+alias dcb='docker compose build'
+alias dcl='docker compose logs'
+alias dcp='docker compose pull'
+alias dcr='docker compose restart'
+alias dce='docker compose exec'
+
+# Docker aliases
+alias d='docker'
 alias di='docker images'
 alias dps='docker ps'
-alias dri='docker rmi'
-alias dr='docker run --rm -it --entrypoint /bin/bash'
-alias hadolint='hadolint -c ~/.hadolint.yaml'
-alias start-docker='open /Applications/Docker.app'
-
-# Python aliases
-alias activate='. ./.venv/bin/activate'
-
-# Flutter
-#alias flutter='fvm flutter'
-#alias dart='fvm dart'
-alias f='fvm flutter'
-alias d='fvm dart'
-alias fg='fvm flutter pub get' # get dependencies
-alias fcl='fvm flutter clean'
-alias fpa='fvm flutter pub add'
-alias fpad='fvm flutter pub add -d'
-alias fpup='fvm flutter pub upgrade'
-alias fcios='flutter precache --ios && rm -rf ios/.symlinks ios/Pods ios/Podfile.lock ios/Runner.xcworkspace && cd ios || exit && pod install --repo-update && cd - || exit'
-fbr () {
-    flutter build "$1" --release
-}
+alias dpsa='docker ps -a'
+alias drm='docker rm'
+alias drmi='docker rmi'
+alias dstop='docker stop'
+alias dstart='docker start'
+alias drestart='docker restart'
+alias dlogs='docker logs'
+alias dexec='docker exec -it'
 
 # Show adb commands
 alias adbi="cat ~/.zsh/adb-commands/AdbCommands"
+
 source ~/.dotfiles/.git_checkout_branch.sh
 source ~/.dotfiles/.git_delete_branch.sh
 source ~/.dotfiles/.tmux_session_selector.sh
