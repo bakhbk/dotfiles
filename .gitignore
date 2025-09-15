@@ -4,3 +4,4 @@
 # Vim swap files
 [._]*.s[a-v][a-z]
 [._]*.sw[a-p]
+.aider*
