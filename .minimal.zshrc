@@ -13,6 +13,7 @@ plugins=(
   zsh-syntax-highlighting
   tmux
   git-flow
+  uv
 )
 export ZSH="$HOME/.oh-my-zsh"
 
