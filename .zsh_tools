@@ -181,6 +181,12 @@ pwgen() {
   LC_ALL=C tr -dc 'A-Za-z0-9@#%^&*()_+=-{}[]:;<>,.?/' < /dev/urandom | head -c "$len" | xargs echo
 }
 
+# Password generator without escaping symbols
+pwgens() {
+  local len=${1:-20}
+  LC_ALL=C tr -dc 'A-Za-z0-9@#%_+=-' < /dev/urandom | head -c "$len" | xargs echo
+}
+
 # Define the path to adb
 ADB_PATH="/Users/$(whoami)/Library/Android/sdk/platform-tools/adb"
 
