@@ -187,6 +187,26 @@ pwgens() {
   LC_ALL=C tr -dc 'A-Za-z0-9@#%_+=-' < /dev/urandom | head -c "$len" | xargs echo
 }
 
+# Delete empty directories recursively from current directory
+# Usage: dedirs [--dry-run]
+dedirs() {
+    local DRY_RUN=false
+
+    if [[ "$1" == "--dry-run" ]]; then
+        DRY_RUN=true
+        echo "Dry run mode - showing directories that would be removed:"
+    fi
+
+    # Find all empty directories and either show or delete them
+    if $DRY_RUN; then
+        find . -type d -empty -print
+    else
+        echo "Removing empty directories..."
+        find . -type d -empty -delete
+        echo "Done."
+    fi
+}
+
 # Define the path to adb
 ADB_PATH="/Users/$(whoami)/Library/Android/sdk/platform-tools/adb"
 
