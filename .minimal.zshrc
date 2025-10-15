@@ -4,6 +4,7 @@ else
   ZSH_THEME="bureau"      # Другая ОС (Linux, Windows WSL и т. д.)
 fi
 plugins=(
+  git-flow
   git
   brew
   aliases
@@ -12,7 +13,6 @@ plugins=(
   you-should-use
   zsh-syntax-highlighting
   tmux
-  git-flow
   uv
 )
 export ZSH="$HOME/.oh-my-zsh"
