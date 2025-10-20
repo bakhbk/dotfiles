@@ -162,11 +162,21 @@ shas(){
     echo $_aliases
 }
 
-alias dfv="shas | grep -E"
 alias dfvv="shas | fzf"
 
+function dfv() {
+    if [ -z "$1" ]; then
+        echo "Usage: dfv <pattern>"
+        return 1
+    fi
+    local LIST
+    LIST="$(shas  2>/dev/null || echo "")
+        $(wtfis "$1" 2>/dev/null || echo "")"
+    echo "$LIST" | grep -E "$1"
+}
+
 _showFlutterAliases () {
-    shshow "alias ([d|f]|dart|flutter)"
+    shas "alias ([d|f]|dart|flutter)"
 }
 
 alias fli="_showFlutterAliases"
