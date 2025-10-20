@@ -18,6 +18,7 @@ CONFIGS=(
   .nvmv.sh
   .minimal.zshrc
   .create_tmux_session.sh
+  .commit.sh
 )
 
 # Configs that should be copied to the home directory.
