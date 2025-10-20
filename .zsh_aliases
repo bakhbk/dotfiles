@@ -141,3 +141,11 @@ source ~/.dotfiles/.git_checkout_branch.sh
 source ~/.dotfiles/.git_delete_branch.sh
 source ~/.dotfiles/.tmux_session_selector.sh
 source ~/.dotfiles/.nvmv.sh
+
+# Aider
+alias aider='aider --no-show-model-warnings --yes'
+alias aider-llama='aider --model ollama/llama3.2:3b'
+
+# Ollama
+alias olist='ollama list'
+alias orun='ollama run llama3.2:3b'
