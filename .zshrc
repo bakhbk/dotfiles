@@ -31,6 +31,7 @@ source ~/.dotfiles/.zsh_tools
 source ~/.dotfiles/.zshenv
 source ~/.dotfiles/.create_tmux_session.sh
 source ~/.dotfiles/.commit.sh
+source ~/.dotfiles/.fvm_tools.sh
 if [ -f ~/work/.zshrc ]; then
   source ~/work/.zshrc
 fi
