@@ -16,7 +16,15 @@ commit() {
 		return 1
 	fi
 
-	# Типы коммитов
+	# ---- New: show number of changed files and line stats ----
+	# git diff --cached --shortstat outputs e.g. "110 files changed, 2841 insertions(+), 1389 deletions(-)"
+	stats=$(git diff --cached --shortstat)
+	if [ -n "$stats" ]; then
+		echo "📊 $stats"
+	fi
+	# ---------------------------------------------------------
+
+	# Commit types
 	echo "Select commit type:"
 	echo "1) feat: New feature"
 	echo "2) fix: Bug fix"
@@ -33,39 +41,17 @@ commit() {
 	read REPLY
 
 	case $REPLY in
-	1)
-		type="feat"
-		;;
-	2)
-		type="fix"
-		;;
-	3)
-		type="docs"
-		;;
-	4)
-		type="style"
-		;;
-	5)
-		type="refactor"
-		;;
-	6)
-		type="perf"
-		;;
-	7)
-		type="test"
-		;;
-	8)
-		type="build"
-		;;
-	9)
-		type="ci"
-		;;
-	10)
-		type="chore"
-		;;
-	11)
-		type="revert"
-		;;
+	1) type="feat" ;;
+	2) type="fix" ;;
+	3) type="docs" ;;
+	4) type="style" ;;
+	5) type="refactor" ;;
+	6) type="perf" ;;
+	7) type="test" ;;
+	8) type="build" ;;
+	9) type="ci" ;;
+	10) type="chore" ;;
+	11) type="revert" ;;
 	*)
 		echo "Invalid option"
 		return 1
@@ -90,19 +76,22 @@ commit() {
 	echo -n "Enter footer (e.g., Closes #123): "
 	read footer
 
-	# Формирование сообщения
+	# Build commit message
 	if [ -n "$scope" ]; then
 		message="$type($scope): $description"
 	else
 		message="$type: $description"
 	fi
 
-	if [ -n "$body" ]; then
-		message="$message"$'\n\n'"$body"
-	fi
+	[ -n "$body" ] && message="$message"$'\n\n'"$body"
+	[ -n "$footer" ] && message="$message"$'\n\n'"$footer"
 
-	if [ -n "$footer" ]; then
-		message="$message"$'\n\n'"$footer"
+	# Add statistics line to message (if available)
+	if [ -n "$stats" ]; then
+		# Transform: "110 files changed, 2841 insertions(+), 1389 deletions(-)"
+		# → "110 files, +2841/-1389 lines"
+		stats_line=$(echo "$stats" | awk '{print $1" files, +"$4"/-"$6" lines"}')
+		message="$message"$'\n\n'"$stats_line"
 	fi
 
 	# Add signoff for preview
@@ -112,16 +101,18 @@ commit() {
 		message="$message"$'\n\n'"Signed-off-by: $name <$email>"
 	fi
 
-	# Создание коммита
+	# Create commit (preview)
 	echo -e "\n📝 Commit message:"
 	echo -e "=================="
 	echo -e "$message"
 	echo -e "=================="
+	# Show stats again for quick reference
+	[ -n "$stats" ] && echo -e "\n📊 $stats"
 
 	echo -n "Create commit? [y/N]: "
 	read confirm
 
-	if [[ $confirm == [yY] ]]; then
+	if [[ $confirm == [yYдД] ]]; then
 		git commit -m "$message"
 		echo "✅ Commit created!"
 	else
