@@ -5,7 +5,6 @@ else
 fi
 plugins=(
   git-flow
-  git
   brew
   aliases
   colorize
@@ -14,6 +13,7 @@ plugins=(
   zsh-syntax-highlighting
   tmux
   uv
+  git
 )
 export ZSH="$HOME/.oh-my-zsh"
 
