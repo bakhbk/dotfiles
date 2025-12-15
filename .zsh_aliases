@@ -79,7 +79,7 @@ alias jt='node_modules/.bin/jest -t'
 alias jdb='node --inspect-brk node_modules/.bin/jest --runInBand'
 
 # Git aliases
-alias gi='grep ^alias.g ~/.zsh_aliases'
+alias gia='grep ^alias.g ~/.zsh_aliases'
 alias ga='git add'
 alias gaa='git add .'
 alias gam='git am --3way --ignore-space-change'

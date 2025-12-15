@@ -139,6 +139,82 @@ rclean () {
   done
 }
 
+# Clean temporary files in various project types
+clean_temp() {
+  # Dart/Flutter projects
+  find . -name "pubspec.yaml" -exec dirname {} \; | while read -r dir; do
+    echo "Cleaning Dart/Flutter project in $dir"
+    cd "$dir"
+    rm -rf .dart_tool build ios/build ios/Pods ios/Podfile.lock android/build
+    if command -v flutter &> /dev/null; then
+      flutter clean
+    elif command -v dart &> /dev/null; then
+      dart clean
+    fi
+    cd - > /dev/null
+  done
+
+  # Node.js/React projects
+  find . -name "package.json" -exec dirname {} \; | while read -r dir; do
+    if [ -d "$dir/node_modules" ]; then
+      echo "Removing node_modules in $dir"
+      rm -rf "$dir/node_modules"
+    fi
+  done
+
+  # PHP projects
+  find . -name "composer.json" -exec dirname {} \; | while read -r dir; do
+    if [ -d "$dir/vendor" ]; then
+      echo "Removing vendor in $dir"
+      rm -rf "$dir/vendor"
+    fi
+  done
+
+  # Go projects
+  find . -name "go.mod" -exec dirname {} \; | while read -r dir; do
+    echo "Cleaning Go project in $dir"
+    (cd "$dir" && go clean ./...)
+  done
+
+  # Rust projects
+  find . -name "Cargo.toml" -exec dirname {} \; | while read -r dir; do
+    echo "Cleaning Rust project in $dir"
+    (cd "$dir" && cargo clean)
+  done
+
+  # Gradle/Java/Android projects
+  find . -name "build.gradle" -o -name "build.gradle.kts" -exec dirname {} \; | while read -r dir; do
+    if [ -d "$dir/build" ]; then
+      echo "Removing build in $dir"
+      rm -rf "$dir/build"
+    fi
+  done
+
+  # Python projects
+  find . -name "pyproject.toml" -o -name "setup.py" -exec dirname {} \; | while read -r dir; do
+    echo "Cleaning Python project in $dir"
+    rm -rf "$dir/__pycache__" "$dir/dist" "$dir/build"
+  done
+
+  # .NET projects
+  find . -name "*.csproj" -exec dirname {} \; | while read -r dir; do
+    echo "Cleaning .NET project in $dir"
+    rm -rf "$dir/bin" "$dir/obj"
+  done
+
+  # Ruby projects
+  find . -name "Gemfile" -exec dirname {} \; | while read -r dir; do
+    echo "Cleaning Ruby project in $dir"
+    rm -rf "$dir/vendor/bundle" "$dir/.bundle"
+  done
+
+  # Elixir projects
+  find . -name "mix.exs" -exec dirname {} \; | while read -r dir; do
+    echo "Cleaning Elixir project in $dir"
+    (cd "$dir" && mix clean)
+  done
+}
+
 # ==========================
 # = Show all aliases start =  
 # ==========================
