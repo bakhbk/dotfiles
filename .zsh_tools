@@ -141,11 +141,27 @@ rclean () {
 
 # Clean temporary files in various project types
 clean_temp() {
+  # Safety check
+  if [[ "$PWD" == "/" ]]; then
+    echo "ERROR: Cannot run clean_temp from root directory"
+    return 1
+  fi
+
+  echo "=== Starting cleanup in $PWD ==="
+
+  # Stash any uncommitted changes in git repos to preserve work
+  echo "=== Stashing git changes ==="
+  find . -name ".git" -type d | while read -r gitdir; do
+    dir=$(dirname "$gitdir")
+    (cd "$dir" && git diff-index --quiet HEAD || (git add . && git stash))
+  done
+
   # Dart/Flutter projects
+  echo "=== Cleaning Dart/Flutter projects ==="
   find . -name "pubspec.yaml" -exec dirname {} \; | while read -r dir; do
-    echo "Cleaning Dart/Flutter project in $dir"
+    echo "Cleaning: $dir"
     cd "$dir"
-    rm -rf .dart_tool build ios/build ios/Pods ios/Podfile.lock android/build
+    rm -rf .dart_tool build ios/build ios/Pods ios/Podfile.lock ios/.symlinks android/build android/.gradle
     if command -v flutter &> /dev/null; then
       flutter clean
     elif command -v dart &> /dev/null; then
@@ -155,26 +171,42 @@ clean_temp() {
   done
 
   # Node.js/React projects
+  echo "=== Cleaning Node.js/React projects ==="
   find . -name "package.json" -exec dirname {} \; | while read -r dir; do
     if [ -d "$dir/node_modules" ]; then
-      echo "Removing node_modules in $dir"
+      echo "Removing: $dir/node_modules"
       rm -rf "$dir/node_modules"
     fi
+    # Additional web temp dirs
+    rm -rf "$dir/__sapper__" "$dir/.next" "$dir/.nuxt" "$dir/logs"
   done
 
   # PHP projects
+  echo "=== Cleaning PHP projects ==="
   find . -name "composer.json" -exec dirname {} \; | while read -r dir; do
     if [ -d "$dir/vendor" ]; then
-      echo "Removing vendor in $dir"
+      echo "Removing: $dir/vendor"
       rm -rf "$dir/vendor"
     fi
+    # Symfony/Laravel cache and logs (dynamic search)
+    find "$dir" -type d \( -path "*/var/cache" -o -path "*/var/log" \) 2>/dev/null | while read -r cachedir; do
+      echo "Removing: $cachedir"
+      rm -rf "$cachedir"
+    done
   done
 
   # Go projects
+  echo "=== Cleaning Go projects ==="
   find . -name "go.mod" -exec dirname {} \; | while read -r dir; do
-    echo "Cleaning Go project in $dir"
-    (cd "$dir" && go clean ./...)
+    echo "Cleaning: $dir"
+    (cd "$dir" && go clean -cache -modcache ./...)
   done
+
+  # Go module cache (global)
+  if [ -d "pkg/mod" ]; then
+    echo "Removing Go module cache"
+    rm -rf pkg/mod
+  fi
 
   # Rust projects
   find . -name "Cargo.toml" -exec dirname {} \; | while read -r dir; do
@@ -187,6 +219,16 @@ clean_temp() {
     if [ -d "$dir/build" ]; then
       echo "Removing build in $dir"
       rm -rf "$dir/build"
+    fi
+    # Additional Gradle temp dirs
+    rm -rf "$dir/.gradle" "$dir/.idea" "$dir/.kotlin"
+  done
+
+  # Maven/Java projects
+  find . -name "pom.xml" -exec dirname {} \; | while read -r dir; do
+    if [ -d "$dir/target" ]; then
+      echo "Removing target in $dir"
+      rm -rf "$dir/target"
     fi
   done
 
@@ -213,6 +255,21 @@ clean_temp() {
     echo "Cleaning Elixir project in $dir"
     (cd "$dir" && mix clean)
   done
+
+  # Cleanup Xcode artifacts
+  find . -type d \( -name "DerivedData" -o -name "*.xcarchive" \) -exec rm -rf {} + 2>/dev/null
+
+  # Cleanup general cache and temp files
+  find . -type f -name ".DS_Store" -delete 2>/dev/null
+
+  # Reset git repos to clean state
+  echo "=== Resetting git repos ==="
+  find . -name ".git" -type d | while read -r gitdir; do
+    dir=$(dirname "$gitdir")
+    (cd "$dir" && git diff-index --quiet HEAD || git reset --hard)
+  done
+
+  echo "=== Cleanup complete ==="
 }
 
 # ==========================
