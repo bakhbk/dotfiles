@@ -4,7 +4,6 @@
 git clone https://github.com/ohmyzsh/ohmyzsh.git ~/.oh-my-zsh
 cd ~/.oh-my-zsh && git pull && cd -
 touch ~/.new_zshrc
-echo "#!/usr/bin/env bash" >~/.new_zshrc
 echo "export USE_OH_MY_ZSH='true'" >>~/.new_zshrc
 echo "$(cat ~/.dotfiles/.minimal.zshrc)" >>~/.new_zshrc
 echo "$(cat ~/.dotfiles/.zshrc)" >>~/.new_zshrc
