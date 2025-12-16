@@ -1,11 +1,6 @@
 # Purprose:
 # zsh configuration.
 
-# Guard: exit if sourced from bash (not zsh)
-if [ -n "$BASH_VERSION" ]; then
-    return 0 2>/dev/null || exit 0
-fi
-
 # Don't beep on errors
 setopt No_Beep
 
