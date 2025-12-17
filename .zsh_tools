@@ -292,7 +292,9 @@ alias_for() {
 # shas | grep -E "^alias g"
 # ```
 shas(){
-    echo $_aliases
+  alias -Lr 2>/dev/null || alias
+  # Убираем ANSI escape-последовательности из вывода функций
+  functions | grep '^[a-zA-Z0-9_]\+ ()' | cut -d' ' -f1 | sed $'s/\e\[[0-9;]*[a-zA-Z]//g'
 }
 
 alias dfvv="shas | fzf"
