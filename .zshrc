@@ -76,6 +76,8 @@ fi
 # https://github.com/junegunn/fzf
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh && source <(fzf --zsh)
 
+[ -f ~/.zshenv ] && source ~/.zshenv
+
 if command -v pyenv >/dev/null; then
     export PYENV_ROOT="$HOME/.pyenv"
     PATH="$PYENV_ROOT/bin:$PATH"
