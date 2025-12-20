@@ -367,3 +367,7 @@ else
         export PATH=$PATH:$ANDROID_HOME/platform-tools
     fi
 fi
+
+function gi() {
+  curl -sLw '\n' https://www.toptal.com/developers/gitignore/api/$@
+}

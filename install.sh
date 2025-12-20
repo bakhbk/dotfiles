@@ -43,7 +43,4 @@ fi
 ./.install-oh-my-zsh.sh
 ./.install_fzf.sh
 
-echo "function gi() { curl -sLw \"\\\n\" https://www.toptal.com/developers/gitignore/api/\$@ ;}" >> \
-  ~/.zshrc && source ~/.zshrc
-
 exit 0
