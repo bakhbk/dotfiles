@@ -26,17 +26,17 @@ commit() {
 
   # Commit types
   echo "Select commit type:"
-  echo "1) feat: New feature"
-  echo "2) fix: Bug fix"
-  echo "3) docs: Documentation"
-  echo "4) style: Code style"
-  echo "5) refactor: Refactoring"
-  echo "6) perf: Performance"
-  echo "7) test: Tests"
-  echo "8) build: Build system"
-  echo "9) ci: CI configuration"
-  echo "10) chore: Chores"
-  echo "11) revert: Revert"
+  echo "1) feat: New feature (новая функциональность)"
+  echo "2) fix: Bug fix (исправление ошибки)"
+  echo "3) docs: Documentation (документация)"
+  echo "4) style: Code style (стили кода)"
+  echo "5) refactor: Refactoring (рефакторинг)"
+  echo "6) perf: Performance (производительность)"
+  echo "7) test: Tests (тесты)"
+  echo "8) build: Build system (система сборки)"
+  echo "9) ci: CI configuration (настройка CI)"
+  echo "10) chore: Chores (рутинные задачи)"
+  echo "11) revert: Revert (отмена изменений)"
   echo -n "Enter number: "
   read REPLY
 
