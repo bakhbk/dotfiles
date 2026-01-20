@@ -5,6 +5,9 @@
 
 set -euxo pipefail
 
+# Extracted clipboard helper installer
+./.install_clipboard_helpers.sh || true
+
 CONFIGS=(
   .zsh_aliases
   .zsh_tools
