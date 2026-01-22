@@ -100,3 +100,7 @@ export PATH="$PATH":"$HOME/.pub-cache/bin"
 if command -v go >/dev/null; then
     export PATH="$PATH:$(go env GOPATH)/bin"
 fi
+
+if [[ "${OSTYPE}" = linux* ]]; then
+    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv zsh)"
+fi
