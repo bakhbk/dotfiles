@@ -1,0 +1,83 @@
+# OPTIMAL CONTAINER ALIASES - NO EXTRA PACKAGES
+
+# Color definitions
+RED=$'\\[\\e[31m\\]'
+GREEN=$'\\[\\e[32m\\]'
+YELLOW=$'\\[\\e[33m\\]'
+BLUE=$'\\[\\e[34m\\]'
+MAGENTA=$'\\[\\e[35m\\]'
+CYAN=$'\\[\\e[36m\\]'
+RESET=$'\\[\\e[0m\\]'
+
+# Basic prompt with container indicator
+if [ -f /.dockerenv ]; then
+    PS1="${GREEN}\\u${RESET}@${CYAN}$CONTAINER_NAME${RESET}:${BLUE}\\h${RESET}:${YELLOW}\\w${RESET}\\$ "
+else
+    PS1="🖥️ ${GREEN}\\u${RESET}@${MAGENTA}\\h${RESET}:${YELLOW}\\w${RESET}\\$ "
+fi
+
+# 1. NAVIGATION (always works)
+alias ..="cd .."
+alias ...="cd ../.."
+alias ~="cd ~"
+alias -- -="cd -"
+
+# 2. FILE LISTING (with safe color fallback)
+if ls --color=auto >/dev/null 2>&1; then
+    alias ls="ls --color=auto"
+    alias ll="ls -la --color=auto"
+else
+    alias ls="ls"
+    alias ll="ls -la"
+fi
+alias la="ls -A"
+alias l="ls -CF"
+
+# 3. FILE VIEWING (core utils)
+alias t="tail"
+alias h="head"
+alias m="more"
+alias lf="ls -p | command grep -v /"  # files only
+alias ld="ls -d */"                   # dirs only
+
+# 4. SEARCH (grep always available)
+if grep --color=auto >/dev/null 2>&1; then
+    alias g="grep --color=auto"
+    alias gi="grep -i --color=auto"
+else
+    alias g="grep"
+    alias gi="grep -i"
+fi
+
+# 5. SYSTEM INFO (usually available)
+alias p="ps aux"
+alias mem="free -h 2>/dev/null || free"
+alias disk="df -h 2>/dev/null || df"
+alias myip="ip addr show 2>/dev/null | grep -oP \"(?<=inet\\s)\\d+(\\.\\d+){3}\" | grep -v \"127.0.0.1\" | head -1"
+
+# 6. QUICK COMMANDS
+alias hi="history | tail -20"
+alias path="echo \$PATH | tr \":\" \"\\n\" | nl"
+alias running="ps aux | grep -v \"grep\" | grep -v \"ps aux\""
+
+# 7. SAFETY
+alias rm="rm -i"
+alias cp="cp -i"
+alias mv="mv -i"
+
+# 8. SHELL UTILS
+alias reload=". ~/.bashrc"
+alias aliases="alias"
+alias functions="declare -f | grep \"^[a-z]\" | cut -d\" \" -f1"
+
+# 9. LOGS (if /var/log exists)
+alias logs="ls -la /var/log/ 2>/dev/null | head -10 || true"
+alias lastlog="find /var/log -type f -name \"*.log\" 2>/dev/null -exec ls -lt {} + | head -5 || true"
+
+# 10. CURRENT INFO
+alias where="pwd && ls -la"
+alias who="whoami && id"
+
+# 11. MISC
+alias c="clear"
+alias e="exit"
