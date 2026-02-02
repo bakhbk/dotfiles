@@ -44,3 +44,12 @@ fb() {
     ;;
   esac
 }
+
+fios() {
+  fvm flutter precache --ios
+  if [ ! -d "ios/Pods" ]; then
+    echo "CocoaPods not found. Installing CocoaPods..."
+    return 1
+  fi
+  (cd ios || { echo "Failed to change directory to ios"; return 1; } && rm -rf Pods Podfile.lock && pod install --repo-update)
+}
