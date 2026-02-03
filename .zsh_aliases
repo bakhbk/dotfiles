@@ -15,7 +15,7 @@ fi
 # Tools
 alias df='df -h'
 alias du='du -h'
-alias dush='du -sh * N | grep -E "[0-9]*[.,]?[0-9]+[GM]" | sort -hr'
+alias dush='du -sh -- .*(D) *(D) N | grep -E "[0-9]*[.,]?[0-9]+[GM]" | sort -hr'
 alias mkdir='mkdir -pv'
 alias reload-bash='source ~/.bashrc'
 alias reload-zsh='source ~/.zshrc'
