@@ -102,5 +102,11 @@ if command -v go >/dev/null; then
 fi
 
 if [[ "${OSTYPE}" = linux* ]]; then
-    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv zsh)"
+    # If Homebrew exists in the standard Linuxbrew location, use it.
+    if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
+        eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+    # Otherwise, if `brew` is on PATH, use that.
+    elif command -v brew >/dev/null 2>&1; then
+        eval "$(brew shellenv)"
+    fi
 fi
