@@ -25,7 +25,6 @@ cci() {
 }
 ccv() {
   (
-    printhead "$1..."
     if eval "$2" &>/dev/null; then
       echo "→ $1 $(eval "$2")"
     else

@@ -19,7 +19,7 @@ source "$SCRIPT_DIR/shared/scripts/setup/flutter_setup.sh"
 cci "protoc-gen-dart" "fvm dart pub global activate protoc_plugin 22.5.0"
 
 
-echo "Версии установленных инструментов:"
+printhead "Версии установленных инструментов"
 ccv "brew версия:" "brew --version"
 ccv "protoc версия:" "protoc --version"
 ccv "task версия:" "task --version"
