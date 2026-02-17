@@ -2,13 +2,13 @@
 
 function printhead() {
   clear
-  sleep 1
   echo "-----------------------------------"
-  echo "Setup Script"
+  echo "Numizma Setup Script"
   echo "-----------------------------------"
   echo ""
   echo "=== $1 ===";
   echo ""
+  sleep 2
 }
 
 cci() {
