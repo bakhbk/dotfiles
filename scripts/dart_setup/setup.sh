@@ -17,18 +17,21 @@ export PATH="$HOME/.pub-cache/bin:$PATH"
 source "$SCRIPT_DIR/shared/scripts/setup/flutter_setup.sh"
 
 cci "protoc-gen-dart" "fvm dart pub global activate protoc_plugin 22.5.0"
+cci "flutterfire_cli" "fvm dart pub global activate flutterfire_cli"
 
 
-printhead "Версии установленных инструментов"
-ccv "brew версия:" "brew --version"
-ccv "protoc версия:" "protoc --version"
-ccv "task версия:" "task --version"
-ccv "grpcurl версия:" "grpcurl --version"
-ccv "fvm версия:" "fvm --version"
-ccv "flutter версия:" "fvm flutter --version | head -1"
-ccv "dart версия:" "fvm dart --version"
-ccv "grpcui версия:" "grpcui --version"
-ccv "mjml версия:" "mjml --version"
+printhead "Versions:"
+ccv "brew version:" "brew --version"
+ccv "protoc version:" "protoc --version"
+ccv "task version:" "task --version"
+ccv "grpcurl version:" "grpcurl --version"
+ccv "fvm version:" "fvm --version"
+ccv "flutter version:" "fvm flutter --version | head -1"
+ccv "dart version:" "fvm dart --version"
+ccv "grpcui version:" "grpcui --version"
+ccv "mjml version:" "mjml --version"
+ccv "protoc-gen-dart version:" "fvm dart pub global list | grep protoc_plugin"
+ccv "flutterfire version:" "flutterfire --version"
 
 # Проверяем protoc-gen-dart
 if command -v protoc-gen-dart &>/dev/null; then
@@ -43,9 +46,9 @@ else
 fi
 
 echo ""
-echo "✅ Настройка проекта завершена!"
+echo "✅ Project setup completed!"
 echo ""
 if [ -f Taskfile.yml ]; then
-  echo "Доступные команды:"
+  echo "Available commands:"
   task
 fi
