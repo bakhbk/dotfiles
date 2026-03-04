@@ -151,3 +151,4 @@ alias aider-llama='aider --model ollama/llama3.2:3b'
 # Ollama
 alias olist='ollama list'
 alias orun='ollama run llama3.2:3b'
+alias trnsl='uv run ~/dotfiles/scripts/trnsl/trnsl.py'
