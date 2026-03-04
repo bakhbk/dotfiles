@@ -179,6 +179,18 @@ def resolve_output(input_path: Path, output_arg: str | None, lang: str) -> Path:
     return input_path.parent / f"{stem}.{lang}.md"
 
 
+def _strip_markdown_fence(text: str) -> str:
+    """Remove outer ```markdown ... ``` wrapper that LLMs sometimes add."""
+    stripped = text.strip()
+    for fence in ("```markdown", "```md", "```"):
+        if stripped.startswith(fence) and stripped.endswith("```"):
+            inner = stripped[len(fence):].lstrip("\n")
+            # only strip if the closing ``` is the final one
+            inner = inner[:inner.rfind("```")].rstrip("\n")
+            return inner
+    return text
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Translate a text file to another language via Ollama."
@@ -237,8 +249,11 @@ def main() -> None:
             translated_parts.append(translate_chunk(chunk, lang, model))
             progress.advance(task)
 
+    result = "\n\n".join(translated_parts)
+    result = _strip_markdown_fence(result)
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text("\n\n".join(translated_parts), encoding="utf-8")
+    output_path.write_text(result, encoding="utf-8")
     console.print(f"[green]✓[/green] saved -> {output_path}")
 
 
