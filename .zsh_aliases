@@ -8,8 +8,26 @@ alias -g M='|more'
 alias -g N='2>/dev/null'
 alias -g J='-H "Content-Type: application/json"'
 alias -g S='-w "\n%{http_code}\n"'
+alias -g L='|less'
+alias -g T10='|tail -10'
+alias -g T20='|tail -20'
+alias -g T50='|tail -50'
+alias -g H10='|head -10'
+alias -g H20='|head -20'
+alias -g H50='|head -50'
+alias -g WC='|wc -l'
+alias -g SORT='|sort'
+alias -g U='|uniq'
+alias -g GI='|grep -i'
+alias -g V='|grep -v'
+alias -g X='|xargs'
+alias -g P='|python -m json.tool'
+alias -g TIME='|ts'
+
+# macOS specific
 if [[ "$OSTYPE" = darwin* ]]; then
-    alias -g CB='| pbcopy'
+    alias -g CP='|pbcopy'
+    alias -g PP='|pbpaste'
 fi
 
 # Tools
