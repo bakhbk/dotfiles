@@ -23,7 +23,7 @@ alias -g V='|grep -v'
 alias -g X='|xargs'
 alias -g P='|python -m json.tool'
 alias -g TIME='|ts'
-alias -g F='|fzf --preview={}'
+alias -g F='|fzf --preview="cat {}"'
 # macOS specific
 if [[ "$OSTYPE" = darwin* ]]; then
     alias -g CP='|pbcopy'
