@@ -49,9 +49,18 @@ if [[ "$OSTYPE" = darwin* ]]; then
     alias grep='grep --color=always'
     alias mc='LC_ALL=en_US.UTF8 mc'
     # Show both local (interface) and public (internet) IPs.
+    # Automatically picks the active network interface and avoids hangs.
     myip() {
-        echo "local:  $(ipconfig getifaddr en0 2>/dev/null || echo 'n/a')"
-        echo "public: $(curl -s --fail https://ifconfig.me || curl -s --fail https://icanhazip.com || dig +short myip.opendns.com @resolver1.opendns.com || echo 'n/a')"
+        local _iface
+        _iface=$(route get default 2>/dev/null | awk '/interface:/ {print $2}')
+        local _local
+        _local=$(ipconfig getifaddr "$_iface" 2>/dev/null || echo 'n/a')
+
+        local _public
+        _public=$(curl -s --max-time 2 --fail https://ifconfig.me || curl -s --max-time 2 --fail https://icanhazip.com || dig +short myip.opendns.com @resolver1.opendns.com || echo 'n/a')
+
+        echo "local:  $_local"
+        echo "public: $_public"
     }
 else
     alias aptget='sudo apt-get'
