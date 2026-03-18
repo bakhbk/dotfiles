@@ -48,7 +48,11 @@ fi
 if [[ "$OSTYPE" = darwin* ]]; then
     alias grep='grep --color=always'
     alias mc='LC_ALL=en_US.UTF8 mc'
-    alias myip="ipconfig getifaddr en0"
+    # Show both local (interface) and public (internet) IPs.
+    myip() {
+        echo "local:  $(ipconfig getifaddr en0 2>/dev/null || echo 'n/a')"
+        echo "public: $(curl -s --fail https://ifconfig.me || curl -s --fail https://icanhazip.com || dig +short myip.opendns.com @resolver1.opendns.com || echo 'n/a')"
+    }
 else
     alias aptget='sudo apt-get'
     alias aptup='sudo apt-get update && sudo apt-get upgrade'
