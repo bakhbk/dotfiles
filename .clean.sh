@@ -1,15 +1,18 @@
 # Purpose:
 # System memory & cache cleanup script.
-# Usage: clean [--all] [--ram] [--brew] [--xcode] [--flutter] [--node] [--docker] [--browsers] [--dev] [--caches]
+# Usage: clean [--all] [--ram] [--brew] [--xcode] [--flutter] [--node] [--docker]
+#              [--browsers] [--go] [--rust] [--python] [--dev] [--logs] [--caches] [--system]
 #
 # Examples:
 #   clean --all
 #   clean --ram --docker
 #   clean --xcode --flutter
+#   clean --go --rust --python
 
 clean() {
   local do_ram=0 do_brew=0 do_xcode=0 do_flutter=0 do_node=0
-  local do_docker=0 do_browsers=0 do_dev=0 do_caches=0
+  local do_docker=0 do_browsers=0 do_go=0 do_rust=0 do_python=0
+  local do_dev=0 do_logs=0 do_caches=0 do_system=0
 
   if [[ $# -eq 0 ]]; then
     echo "Usage: clean [OPTIONS]"
@@ -18,19 +21,26 @@ clean() {
     echo "  --all        Run all cleanups"
     echo "  --ram        Free inactive RAM (sudo purge)"
     echo "  --brew       Homebrew cleanup"
-    echo "  --xcode      Xcode DerivedData, simulators, CocoaPods cache"
-    echo "  --flutter    Flutter build/, pub-cache, Gradle caches"
-    echo "  --node       node_modules (rclean), npm cache"
-    echo "  --docker     Docker system + image prune"
-    echo "  --browsers   Chrome, Firefox, Cursor, Yandex caches"
-    echo "  --dev        Dev tool caches: aider, .gradle, .dart_tool, .pub-cache, etc."
+    echo "  --xcode      Xcode DerivedData, DeviceSupport, simulators, CocoaPods"
+    echo "  --flutter    Flutter build/, pub-cache, Gradle, Android caches"
+    echo "  --node       node_modules (rclean), npm/yarn/pnpm cache"
+    echo "  --docker     Docker system + image + volume + builder prune"
+    echo "  --browsers   Chrome, Firefox, Safari, Arc, Cursor, Yandex caches"
+    echo "  --go         Go build/test cache (~/.cache/go-build)"
+    echo "  --rust       Cargo registry & git db cache"
+    echo "  --python     uv, pip, pyenv, Poetry caches"
+    echo "  --dev        Dev tool caches: aider, Neovim, Ollama, .llm, Cline, etc."
+    echo "  --logs       App logs in ~/Library/Logs (>7 days old)"
     echo "  --caches     ~/Library/Caches for heavy apps (JetBrains, VSCode, etc.)"
+    echo "  --system     DNS flush, font cache, Trash empty"
     return 0
   fi
 
   for arg in "$@"; do
     case "$arg" in
-      --all)      do_ram=1; do_brew=1; do_xcode=1; do_flutter=1; do_node=1; do_docker=1; do_browsers=1; do_dev=1; do_caches=1 ;;
+      --all)      do_ram=1; do_brew=1; do_xcode=1; do_flutter=1; do_node=1; do_docker=1
+                  do_browsers=1; do_go=1; do_rust=1; do_python=1
+                  do_dev=1; do_logs=1; do_caches=1; do_system=1 ;;
       --ram)      do_ram=1 ;;
       --brew)     do_brew=1 ;;
       --xcode)    do_xcode=1 ;;
@@ -38,8 +48,13 @@ clean() {
       --node)     do_node=1 ;;
       --docker)   do_docker=1 ;;
       --browsers) do_browsers=1 ;;
+      --go)       do_go=1 ;;
+      --rust)     do_rust=1 ;;
+      --python)   do_python=1 ;;
       --dev)      do_dev=1 ;;
+      --logs)     do_logs=1 ;;
       --caches)   do_caches=1 ;;
+      --system)   do_system=1 ;;
       *)
         echo "Unknown option: $arg"
         echo "Run 'clean' with no arguments to see usage."
@@ -48,106 +63,253 @@ clean() {
     esac
   done
 
+  # Pre-cache sudo credentials so parallel sudo calls don't prompt multiple times
+  if [[ $do_ram -eq 1 || $do_system -eq 1 ]]; then
+    sudo -v || { echo "⚠️  sudo required for --ram / --system"; return 1; }
+  fi
+
+  local _tmp
+  _tmp=$(mktemp -d)
+  local _pids=() _outs=()
+
   # ── RAM ──────────────────────────────────────────────────────────────────
   if [[ $do_ram -eq 1 ]]; then
-    echo "\n🧠 Freeing inactive RAM..."
-    sudo purge && echo "  ✓ purge done"
+    local _o="$_tmp/01_ram"; _outs+=("$_o")
+    {
+      echo "\n🧠 Freeing inactive RAM..."
+      sudo purge && echo "  ✓ purge done"
+    } >"$_o" 2>&1 &
+    _pids+=($!)
   fi
 
   # ── Homebrew ──────────────────────────────────────────────────────────────
   if [[ $do_brew -eq 1 ]]; then
-    echo "\n🍺 Homebrew cleanup..."
-    brew cleanup --prune=all 2>/dev/null && echo "  ✓ brew cleanup done"
+    local _o="$_tmp/02_brew"; _outs+=("$_o")
+    {
+      echo "\n🍺 Homebrew cleanup..."
+      brew cleanup --prune=all 2>/dev/null && echo "  ✓ brew cleanup done"
+    } >"$_o" 2>&1 &
+    _pids+=($!)
   fi
 
   # ── Xcode ────────────────────────────────────────────────────────────────
   if [[ $do_xcode -eq 1 ]]; then
-    echo "\n📱 Xcode cleanup..."
-    rm -rf ~/Library/Developer/Xcode/DerivedData 2>/dev/null && echo "  ✓ DerivedData removed"
-    xcrun simctl shutdown all 2>/dev/null && echo "  ✓ simulators shut down"
-    xcrun simctl erase all 2>/dev/null && echo "  ✓ simulators erased"
-    pod cache clean --all 2>/dev/null && echo "  ✓ CocoaPods cache cleaned"
-    rm -rf ~/Library/Caches/com.apple.mail 2>/dev/null
+    local _o="$_tmp/03_xcode"; _outs+=("$_o")
+    {
+      echo "\n📱 Xcode cleanup..."
+      rm -rf ~/Library/Developer/Xcode/DerivedData 2>/dev/null && echo "  ✓ DerivedData removed"
+      rm -rf ~/Library/Developer/Xcode/iOS\ DeviceSupport 2>/dev/null && echo "  ✓ iOS DeviceSupport removed"
+      rm -rf ~/Library/Developer/Xcode/watchOS\ DeviceSupport 2>/dev/null && echo "  ✓ watchOS DeviceSupport removed"
+      rm -rf ~/Library/Developer/CoreSimulator/Caches 2>/dev/null && echo "  ✓ CoreSimulator caches removed"
+      xcrun simctl shutdown all 2>/dev/null && echo "  ✓ simulators shut down"
+      xcrun simctl erase all 2>/dev/null && echo "  ✓ simulators erased"
+      pod cache clean --all 2>/dev/null && echo "  ✓ CocoaPods cache cleaned"
+    } >"$_o" 2>&1 &
+    _pids+=($!)
   fi
 
-  # ── Flutter / Dart ────────────────────────────────────────────────────────
+  # ── Flutter / Dart / Android ──────────────────────────────────────────────
   if [[ $do_flutter -eq 1 ]]; then
-    echo "\n🐦 Flutter/Dart cleanup..."
-    rm -rf ~/.pub-cache 2>/dev/null && echo "  ✓ .pub-cache removed"
-    rm -rf ~/.dart_tool 2>/dev/null && echo "  ✓ .dart_tool removed"
-    rm -rf ~/.gradle/caches 2>/dev/null && echo "  ✓ Gradle caches removed"
-    fclean 2>/dev/null && echo "  ✓ flutter project build/ dirs removed"
-    if command -v fvm &>/dev/null; then
-      fvm flutter pub cache clean 2>/dev/null && echo "  ✓ fvm pub cache cleaned"
-    elif command -v flutter &>/dev/null; then
-      flutter pub cache clean 2>/dev/null && echo "  ✓ flutter pub cache cleaned"
-    fi
+    local _o="$_tmp/04_flutter"; _outs+=("$_o")
+    {
+      echo "\n🐦 Flutter/Dart/Android cleanup..."
+      rm -rf ~/.pub-cache 2>/dev/null && echo "  ✓ .pub-cache removed"
+      rm -rf ~/.dart_tool 2>/dev/null && echo "  ✓ .dart_tool removed"
+      rm -rf ~/.gradle/caches 2>/dev/null && echo "  ✓ Gradle caches removed"
+      rm -rf ~/.android/cache 2>/dev/null && echo "  ✓ Android SDK cache removed"
+      rm -rf ~/Library/Caches/Google/AndroidStudio* 2>/dev/null && echo "  ✓ Android Studio caches removed"
+      fclean 2>/dev/null && echo "  ✓ flutter project build/ dirs removed"
+      if command -v fvm &>/dev/null; then
+        fvm flutter pub cache clean 2>/dev/null && echo "  ✓ fvm pub cache cleaned"
+      elif command -v flutter &>/dev/null; then
+        flutter pub cache clean 2>/dev/null && echo "  ✓ flutter pub cache cleaned"
+      fi
+    } >"$_o" 2>&1 &
+    _pids+=($!)
   fi
 
-  # ── Node / npm ────────────────────────────────────────────────────────────
+  # ── Node / npm / yarn / pnpm ──────────────────────────────────────────────
   if [[ $do_node -eq 1 ]]; then
-    echo "\n📦 Node/npm cleanup..."
-    npm cache clean --force 2>/dev/null && echo "  ✓ npm cache cleaned"
-    rclean 2>/dev/null && echo "  ✓ node_modules dirs removed"
-    rm -rf ~/.npm/_logs/*.log 2>/dev/null && echo "  ✓ npm logs removed"
+    local _o="$_tmp/05_node"; _outs+=("$_o")
+    {
+      echo "\n📦 Node/npm/yarn/pnpm cleanup..."
+      npm cache clean --force 2>/dev/null && echo "  ✓ npm cache cleaned"
+      rclean 2>/dev/null && echo "  ✓ node_modules dirs removed"
+      rm -rf ~/.npm/_logs/*.log 2>/dev/null && echo "  ✓ npm logs removed"
+      if command -v yarn &>/dev/null; then
+        yarn cache clean 2>/dev/null && echo "  ✓ yarn cache cleaned"
+      fi
+      rm -rf ~/.cache/yarn 2>/dev/null && echo "  ✓ yarn cache dir removed"
+      if command -v pnpm &>/dev/null; then
+        pnpm store prune 2>/dev/null && echo "  ✓ pnpm store pruned"
+      fi
+    } >"$_o" 2>&1 &
+    _pids+=($!)
   fi
 
   # ── Docker ───────────────────────────────────────────────────────────────
   if [[ $do_docker -eq 1 ]]; then
-    echo "\n🐳 Docker cleanup..."
-    docker system prune -f 2>/dev/null && echo "  ✓ docker system pruned"
-    docker image prune -a -f 2>/dev/null && echo "  ✓ docker images pruned"
+    local _o="$_tmp/06_docker"; _outs+=("$_o")
+    {
+      echo "\n🐳 Docker cleanup..."
+      docker system prune -f 2>/dev/null && echo "  ✓ docker system pruned"
+      docker image prune -a -f 2>/dev/null && echo "  ✓ docker images pruned"
+      docker volume prune -f 2>/dev/null && echo "  ✓ docker volumes pruned"
+      docker builder prune -a -f 2>/dev/null && echo "  ✓ docker builder cache pruned"
+    } >"$_o" 2>&1 &
+    _pids+=($!)
   fi
 
   # ── Browsers ─────────────────────────────────────────────────────────────
   if [[ $do_browsers -eq 1 ]]; then
-    echo "\n🌐 Browser caches cleanup..."
-    rm -rf ~/Library/Application\ Support/Google/Chrome/ 2>/dev/null && echo "  ✓ Chrome App Support removed"
-    rm -rf ~/Library/Caches/Google/Chrome/ 2>/dev/null && echo "  ✓ Chrome Caches removed"
-    rm -rf ~/Library/Preferences/com.google.Chrome.plist 2>/dev/null
-    rm -rf ~/Library/Saved\ Application\ State/com.google.Chrome.savedState/ 2>/dev/null
-    rm -rf ~/Library/Caches/MediaAnalysis 2>/dev/null && echo "  ✓ MediaAnalysis cache removed"
-    rm -rf ~/Library/Caches/com.apple.mediaanalysisd 2>/dev/null
-    rm -rf ~/Library/Caches/ru.yandex.* 2>/dev/null && echo "  ✓ Yandex caches removed"
-    rm -rf ~/Library/Caches/Firefox 2>/dev/null && echo "  ✓ Firefox cache removed"
+    local _o="$_tmp/07_browsers"; _outs+=("$_o")
+    {
+      echo "\n🌐 Browser caches cleanup..."
+      rm -rf ~/Library/Caches/Google/Chrome 2>/dev/null && echo "  ✓ Chrome Caches removed"
+      rm -rf ~/Library/Application\ Support/Google/Chrome/Default/Cache 2>/dev/null
+      rm -rf ~/Library/Application\ Support/Google/Chrome/Default/Code\ Cache 2>/dev/null
+      rm -rf ~/Library/Application\ Support/Google/Chrome/Default/GPUCache 2>/dev/null && echo "  ✓ Chrome profile caches removed"
+      rm -rf ~/Library/Caches/MediaAnalysis 2>/dev/null && echo "  ✓ MediaAnalysis cache removed"
+      rm -rf ~/Library/Caches/com.apple.mediaanalysisd 2>/dev/null
+      rm -rf ~/Library/Caches/ru.yandex.* 2>/dev/null && echo "  ✓ Yandex caches removed"
+      rm -rf ~/Library/Caches/Firefox 2>/dev/null && echo "  ✓ Firefox cache removed"
+      rm -rf ~/Library/Caches/com.apple.Safari 2>/dev/null && echo "  ✓ Safari cache removed"
+      rm -rf ~/Library/Safari/LocalStorage 2>/dev/null && echo "  ✓ Safari LocalStorage removed"
+      rm -rf ~/Library/Application\ Support/Cursor/Cache 2>/dev/null
+      rm -rf ~/Library/Application\ Support/Cursor/Code\ Cache 2>/dev/null
+      rm -rf ~/Library/Application\ Support/Cursor/GPUCache 2>/dev/null && echo "  ✓ Cursor caches removed"
+      rm -rf ~/Library/Caches/company.thebrowser.Browser 2>/dev/null && echo "  ✓ Arc cache removed"
+    } >"$_o" 2>&1 &
+    _pids+=($!)
+  fi
+
+  # ── Go ───────────────────────────────────────────────────────────────────
+  if [[ $do_go -eq 1 ]]; then
+    local _o="$_tmp/08_go"; _outs+=("$_o")
+    {
+      echo "\n🐹 Go cleanup..."
+      if command -v go &>/dev/null; then
+        go clean -cache 2>/dev/null && echo "  ✓ Go build cache cleaned"
+        go clean -testcache 2>/dev/null && echo "  ✓ Go test cache cleaned"
+      fi
+      rm -rf ~/.cache/go-build 2>/dev/null && echo "  ✓ ~/.cache/go-build removed"
+    } >"$_o" 2>&1 &
+    _pids+=($!)
+  fi
+
+  # ── Rust / Cargo ─────────────────────────────────────────────────────────
+  if [[ $do_rust -eq 1 ]]; then
+    local _o="$_tmp/09_rust"; _outs+=("$_o")
+    {
+      echo "\n🦀 Rust/Cargo cleanup..."
+      rm -rf ~/.cargo/registry/cache 2>/dev/null && echo "  ✓ Cargo registry cache removed"
+      rm -rf ~/.cargo/git/db 2>/dev/null && echo "  ✓ Cargo git db removed"
+    } >"$_o" 2>&1 &
+    _pids+=($!)
+  fi
+
+  # ── Python ───────────────────────────────────────────────────────────────
+  if [[ $do_python -eq 1 ]]; then
+    local _o="$_tmp/10_python"; _outs+=("$_o")
+    {
+      echo "\n🐍 Python cleanup..."
+      if command -v uv &>/dev/null; then
+        uv cache clean 2>/dev/null && echo "  ✓ uv cache cleaned"
+      fi
+      rm -rf ~/.cache/uv 2>/dev/null && echo "  ✓ ~/.cache/uv removed"
+      rm -rf ~/.cache/pip 2>/dev/null && echo "  ✓ pip cache removed"
+      rm -rf ~/.pyenv/cache 2>/dev/null && echo "  ✓ pyenv download cache removed"
+      rm -rf ~/Library/Caches/pypoetry 2>/dev/null && echo "  ✓ Poetry cache removed"
+    } >"$_o" 2>&1 &
+    _pids+=($!)
   fi
 
   # ── Dev tools ────────────────────────────────────────────────────────────
   if [[ $do_dev -eq 1 ]]; then
-    echo "\n🔧 Dev tools cleanup..."
-    rm -rf ~/.cache/aider 2>/dev/null && echo "  ✓ aider cache removed"
-    rm -rf ~/.aider* 2>/dev/null && echo "  ✓ .aider* removed"
-    rm -rf ~/.cache/pip 2>/dev/null && echo "  ✓ pip cache removed"
-    rm -rf ~/.llm 2>/dev/null && echo "  ✓ .llm removed"
-    rm -rf "~/Library/Application Support/io.datasette.llm" 2>/dev/null
-    rm -rf ~/.cocoapods 2>/dev/null && echo "  ✓ .cocoapods removed"
-    rm -rf ~/.cline ~/.clinerc 2>/dev/null && echo "  ✓ .cline removed"
-    rm -rf ~/.gradle/caches 2>/dev/null && echo "  ✓ Gradle caches removed"
-    rm -rf ~/.dart_tool 2>/dev/null
-    rm -rf ~/.zcompdump* 2>/dev/null && echo "  ✓ zsh completion cache removed"
-    clean_temp 2>/dev/null && echo "  ✓ clean_temp done"
+    local _o="$_tmp/11_dev"; _outs+=("$_o")
+    {
+      echo "\n🔧 Dev tools cleanup..."
+      rm -rf ~/.cache/aider 2>/dev/null && echo "  ✓ aider cache removed"
+      rm -rf ~/.aider* 2>/dev/null && echo "  ✓ .aider* removed"
+      rm -rf ~/.llm 2>/dev/null && echo "  ✓ .llm removed"
+      rm -rf ~/Library/Application\ Support/io.datasette.llm 2>/dev/null && echo "  ✓ datasette llm removed"
+      rm -rf ~/.cocoapods 2>/dev/null && echo "  ✓ .cocoapods removed"
+      rm -rf ~/.cline ~/.clinerc 2>/dev/null && echo "  ✓ .cline removed"
+      rm -rf ~/.zcompdump* 2>/dev/null && echo "  ✓ zsh completion cache removed"
+      rm -rf ~/.local/share/nvim/swap 2>/dev/null && echo "  ✓ Neovim swap removed"
+      rm -rf ~/.local/share/nvim/undo 2>/dev/null && echo "  ✓ Neovim undo removed"
+      rm -rf ~/.local/share/nvim/lazy/stats 2>/dev/null && echo "  ✓ Neovim lazy stats removed"
+      rm -rf ~/.ollama/logs 2>/dev/null && echo "  ✓ Ollama logs removed"
+      clean_temp 2>/dev/null && echo "  ✓ clean_temp done"
+    } >"$_o" 2>&1 &
+    _pids+=($!)
+  fi
+
+  # ── Logs ─────────────────────────────────────────────────────────────────
+  if [[ $do_logs -eq 1 ]]; then
+    local _o="$_tmp/12_logs"; _outs+=("$_o")
+    {
+      echo "\n📋 Logs cleanup..."
+      rm -rf ~/Library/Logs/CoreSimulator 2>/dev/null && echo "  ✓ CoreSimulator logs removed"
+      find ~/Library/Logs -name "*.log" -mtime +7 -delete 2>/dev/null && echo "  ✓ App logs older than 7 days removed"
+      rm -rf ~/.npm/_logs/*.log 2>/dev/null && echo "  ✓ npm logs removed"
+    } >"$_o" 2>&1 &
+    _pids+=($!)
   fi
 
   # ── App Caches (~/Library/Caches) ─────────────────────────────────────────
   if [[ $do_caches -eq 1 ]]; then
-    echo "\n🗂  App caches cleanup..."
-    local caches_dir=~/Library/Caches
-    local app_caches=(
-      "com.jetbrains.*"
-      "JetBrains"
-      "com.microsoft.VSCode"
-      "com.todesktop.*"
-      "dev.warp.*"
-      "com.obsidian.*"
-      "com.postmanlabs.*"
-      "com.google.*"
-      "asc.onlyoffice.*"
-    )
-    for pattern in "${app_caches[@]}"; do
-      rm -rf ${caches_dir}/${~pattern} 2>/dev/null
-    done
-    echo "  ✓ App caches cleaned (JetBrains, VSCode, Warp, Obsidian, Postman, Google, OnlyOffice)"
+    local _o="$_tmp/13_caches"; _outs+=("$_o")
+    {
+      echo "\n🗂  App caches cleanup..."
+      local caches_dir=~/Library/Caches
+      local app_caches=(
+        "com.jetbrains.*"
+        "JetBrains"
+        "com.microsoft.VSCode"
+        "com.todesktop.*"
+        "dev.warp.*"
+        "com.obsidian.*"
+        "com.postmanlabs.*"
+        "com.google.*"
+        "asc.onlyoffice.*"
+        "company.thebrowser.Browser"
+        "com.tinyspeck.slackmacgap"
+        "ru.keepcoder.Telegram"
+        "com.apple.Safari"
+      )
+      for pattern in "${app_caches[@]}"; do
+        rm -rf ${caches_dir}/${~pattern}(N) 2>/dev/null
+      done
+      echo "  ✓ App caches cleaned (JetBrains, VSCode, Warp, Obsidian, Postman, Google, OnlyOffice, Arc, Slack, Telegram, Safari)"
+    } >"$_o" 2>&1 &
+    _pids+=($!)
   fi
 
-  echo "\n✅ Done."
+  # ── System ───────────────────────────────────────────────────────────────
+  if [[ $do_system -eq 1 ]]; then
+    local _o="$_tmp/14_system"; _outs+=("$_o")
+    {
+      echo "\n⚙️  System cleanup..."
+      sudo dscacheutil -flushcache 2>/dev/null && sudo killall -HUP mDNSResponder 2>/dev/null && echo "  ✓ DNS cache flushed"
+      sudo atsutil databases -remove 2>/dev/null && echo "  ✓ Font cache removed"
+      osascript -e 'tell application "Finder" to empty trash' 2>/dev/null && echo "  ✓ Trash emptied"
+      sudo rm -rf /private/var/log/asl/*.asl 2>/dev/null && echo "  ✓ ASL system logs removed"
+    } >"$_o" 2>&1 &
+    _pids+=($!)
+  fi
+
+  # ── Wait & print ──────────────────────────────────────────────────────────
+  echo "⏳ Running ${#_pids[@]} cleanup tasks in parallel..."
+  local _failed=0
+  for pid in "${_pids[@]}"; do
+    wait "$pid" || (( _failed++ ))
+  done
+
+  for out in "${_outs[@]}"; do
+    [[ -f "$out" ]] && cat "$out"
+  done
+  rm -rf "$_tmp"
+
+  echo "\n✅ Done (${#_pids[@]} tasks, $_failed failed)."
 }
