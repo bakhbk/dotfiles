@@ -1,5 +1,6 @@
 # Purpose:
 # System memory & cache cleanup script.
+# NOTE: Must be sourced in zsh — uses zsh-specific glob features (${~var}(N)).
 # Usage: clean [--all] [--ram] [--brew] [--xcode] [--flutter] [--node] [--docker]
 #              [--browsers] [--go] [--rust] [--python] [--dev] [--logs] [--caches] [--system]
 #
@@ -10,6 +11,11 @@
 #   clean --go --rust --python
 
 clean() {
+  if [[ -z "$ZSH_VERSION" ]]; then
+    echo "⚠️  clean requires zsh. Source this file in zsh, not sh/bash."
+    return 1
+  fi
+
   local do_ram=0 do_brew=0 do_xcode=0 do_flutter=0 do_node=0
   local do_docker=0 do_browsers=0 do_go=0 do_rust=0 do_python=0
   local do_dev=0 do_logs=0 do_caches=0 do_system=0
@@ -77,7 +83,7 @@ clean() {
     local _o="$_tmp/01_ram"; _outs+=("$_o")
     {
       echo "\n🧠 Freeing inactive RAM..."
-      sudo purge && echo "  ✓ purge done"
+      sudo -n purge && echo "  ✓ purge done"
     } >"$_o" 2>&1 &
     _pids+=($!)
   fi
@@ -106,7 +112,7 @@ clean() {
       xcrun simctl erase all 2>/dev/null && echo "  ✓ simulators erased"
       # System-level simulator runtimes — the big ones (up to 16G in /Library/Developer)
       xcrun simctl runtime delete all 2>/dev/null && echo "  ✓ simulator runtimes deleted"
-      sudo rm -rf /Library/Developer/CoreSimulator/Caches 2>/dev/null && echo "  ✓ System CoreSimulator caches removed"
+      sudo -n rm -rf /Library/Developer/CoreSimulator/Caches 2>/dev/null && echo "  ✓ System CoreSimulator caches removed"
       pod cache clean --all 2>/dev/null && echo "  ✓ CocoaPods cache cleaned"
       rm -rf ~/Library/Caches/CocoaPods 2>/dev/null && echo "  ✓ CocoaPods Library cache removed"
       rm -rf ~/.swiftpm/cache 2>/dev/null && echo "  ✓ SwiftPM cache removed"
@@ -325,14 +331,14 @@ clean() {
     local _o="$_tmp/14_system"; _outs+=("$_o")
     {
       echo "\n⚙️  System cleanup..."
-      sudo dscacheutil -flushcache 2>/dev/null && sudo killall -HUP mDNSResponder 2>/dev/null && echo "  ✓ DNS cache flushed"
-      sudo atsutil databases -remove 2>/dev/null && echo "  ✓ Font cache removed"
+      sudo -n dscacheutil -flushcache 2>/dev/null && sudo -n killall -HUP mDNSResponder 2>/dev/null && echo "  ✓ DNS cache flushed"
+      sudo -n atsutil databases -remove 2>/dev/null && echo "  ✓ Font cache removed"
       osascript -e 'tell application "Finder" to empty trash' 2>/dev/null && echo "  ✓ Trash emptied"
-      sudo rm -rf /private/var/log/asl/*.asl 2>/dev/null && echo "  ✓ ASL system logs removed"
+      sudo -n rm -rf /private/var/log/asl/*.asl 2>/dev/null && echo "  ✓ ASL system logs removed"
       # Time Machine local snapshots — hidden reserved space, can be several GB
-      tmutil deletelocalsnapshots / 2>/dev/null && echo "  ✓ Time Machine local snapshots deleted"
+      sudo -n tmutil deletelocalsnapshots / 2>/dev/null && echo "  ✓ Time Machine local snapshots deleted"
       # Unified system log database (~2-3 GB, rebuilt automatically by logd)
-      sudo log erase --all 2>/dev/null && echo "  ✓ Unified log database erased"
+      sudo -n log erase --all 2>/dev/null && echo "  ✓ Unified log database erased"
     } >"$_o" 2>&1 &
     _pids+=($!)
   fi
