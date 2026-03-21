@@ -20,8 +20,8 @@ clean() {
     echo "Options:"
     echo "  --all        Run all cleanups"
     echo "  --ram        Free inactive RAM (sudo purge)"
-    echo "  --brew       Homebrew cleanup"
-    echo "  --xcode      Xcode DerivedData, DeviceSupport, simulators, CocoaPods"
+    echo "  --brew       Homebrew cleanup + autoremove"
+    echo "  --xcode      Xcode DerivedData, DeviceSupport, sim runtimes (sudo), CocoaPods"
     echo "  --flutter    Flutter build/, pub-cache, Gradle, Android caches"
     echo "  --node       node_modules (rclean), npm/yarn/pnpm cache"
     echo "  --docker     Docker system + image + volume + builder prune"
@@ -32,7 +32,7 @@ clean() {
     echo "  --dev        Dev tool caches: aider, Neovim, Ollama, .llm, Cline, etc."
     echo "  --logs       App logs in ~/Library/Logs (>7 days old)"
     echo "  --caches     ~/Library/Caches for heavy apps (JetBrains, VSCode, etc.)"
-    echo "  --system     DNS flush, font cache, Trash empty"
+    echo "  --system     DNS flush, font cache, Trash, Time Machine snapshots (sudo)"
     return 0
   fi
 
@@ -64,8 +64,8 @@ clean() {
   done
 
   # Pre-cache sudo credentials so parallel sudo calls don't prompt multiple times
-  if [[ $do_ram -eq 1 || $do_system -eq 1 ]]; then
-    sudo -v || { echo "⚠️  sudo required for --ram / --system"; return 1; }
+  if [[ $do_ram -eq 1 || $do_xcode -eq 1 || $do_system -eq 1 ]]; then
+    sudo -v || { echo "⚠️  sudo required for --ram / --xcode / --system"; return 1; }
   fi
 
   local _tmp
@@ -88,6 +88,7 @@ clean() {
     {
       echo "\n🍺 Homebrew cleanup..."
       brew cleanup --prune=all 2>/dev/null && echo "  ✓ brew cleanup done"
+      brew autoremove 2>/dev/null && echo "  ✓ brew orphan formulae removed"
     } >"$_o" 2>&1 &
     _pids+=($!)
   fi
@@ -100,10 +101,15 @@ clean() {
       rm -rf ~/Library/Developer/Xcode/DerivedData 2>/dev/null && echo "  ✓ DerivedData removed"
       rm -rf ~/Library/Developer/Xcode/iOS\ DeviceSupport 2>/dev/null && echo "  ✓ iOS DeviceSupport removed"
       rm -rf ~/Library/Developer/Xcode/watchOS\ DeviceSupport 2>/dev/null && echo "  ✓ watchOS DeviceSupport removed"
-      rm -rf ~/Library/Developer/CoreSimulator/Caches 2>/dev/null && echo "  ✓ CoreSimulator caches removed"
+      rm -rf ~/Library/Developer/CoreSimulator/Caches 2>/dev/null && echo "  ✓ User CoreSimulator caches removed"
       xcrun simctl shutdown all 2>/dev/null && echo "  ✓ simulators shut down"
       xcrun simctl erase all 2>/dev/null && echo "  ✓ simulators erased"
+      # System-level simulator runtimes — the big ones (up to 16G in /Library/Developer)
+      xcrun simctl runtime delete all 2>/dev/null && echo "  ✓ simulator runtimes deleted"
+      sudo rm -rf /Library/Developer/CoreSimulator/Caches 2>/dev/null && echo "  ✓ System CoreSimulator caches removed"
       pod cache clean --all 2>/dev/null && echo "  ✓ CocoaPods cache cleaned"
+      rm -rf ~/Library/Caches/CocoaPods 2>/dev/null && echo "  ✓ CocoaPods Library cache removed"
+      rm -rf ~/.swiftpm/cache 2>/dev/null && echo "  ✓ SwiftPM cache removed"
     } >"$_o" 2>&1 &
     _pids+=($!)
   fi
@@ -172,6 +178,15 @@ clean() {
       rm -rf ~/Library/Caches/MediaAnalysis 2>/dev/null && echo "  ✓ MediaAnalysis cache removed"
       rm -rf ~/Library/Caches/com.apple.mediaanalysisd 2>/dev/null
       rm -rf ~/Library/Caches/ru.yandex.* 2>/dev/null && echo "  ✓ Yandex caches removed"
+      rm -rf ~/Library/Application\ Support/Yandex/YandexBrowser/Default/Cache 2>/dev/null
+      rm -rf ~/Library/Application\ Support/Yandex/YandexBrowser/Default/Code\ Cache 2>/dev/null
+      rm -rf ~/Library/Application\ Support/Yandex/YandexBrowser/Default/GPUCache 2>/dev/null
+      rm -rf ~/Library/Application\ Support/Yandex/YandexBrowser/Default/DawnWebGPUCache 2>/dev/null
+      rm -rf ~/Library/Application\ Support/Yandex/YandexBrowser/Default/DawnGraphiteCache 2>/dev/null
+      rm -rf ~/Library/Application\ Support/Yandex/YandexBrowser/Default/TurboAppCache 2>/dev/null
+      rm -rf ~/Library/Application\ Support/Yandex/YandexBrowser/ShaderCache 2>/dev/null
+      rm -rf ~/Library/Application\ Support/Yandex/YandexBrowser/GraphiteDawnCache 2>/dev/null
+      rm -rf ~/Library/Application\ Support/Yandex/YandexBrowser/GrShaderCache 2>/dev/null && echo "  ✓ Yandex App Support caches removed"
       rm -rf ~/Library/Caches/Firefox 2>/dev/null && echo "  ✓ Firefox cache removed"
       rm -rf ~/Library/Caches/com.apple.Safari 2>/dev/null && echo "  ✓ Safari cache removed"
       rm -rf ~/Library/Safari/LocalStorage 2>/dev/null && echo "  ✓ Safari LocalStorage removed"
@@ -240,6 +255,10 @@ clean() {
       rm -rf ~/.local/share/nvim/undo 2>/dev/null && echo "  ✓ Neovim undo removed"
       rm -rf ~/.local/share/nvim/lazy/stats 2>/dev/null && echo "  ✓ Neovim lazy stats removed"
       rm -rf ~/.ollama/logs 2>/dev/null && echo "  ✓ Ollama logs removed"
+      rm -rf ~/.cache/firebase 2>/dev/null && echo "  ✓ Firebase CLI cache removed"
+      rm -rf ~/.cache/gem 2>/dev/null && echo "  ✓ Ruby gem cache removed"
+      rm -rf ~/.cache/nvim 2>/dev/null && echo "  ✓ Neovim cache dir removed"
+      rm -rf ~/.cache/mesa_shader_cache 2>/dev/null && echo "  ✓ Mesa shader cache removed"
       clean_temp 2>/dev/null && echo "  ✓ clean_temp done"
     } >"$_o" 2>&1 &
     _pids+=($!)
@@ -282,6 +301,21 @@ clean() {
         rm -rf ${caches_dir}/${~pattern}(N) 2>/dev/null
       done
       echo "  ✓ App caches cleaned (JetBrains, VSCode, Warp, Obsidian, Postman, Google, OnlyOffice, Arc, Slack, Telegram, Safari)"
+      # VSCode Application Support caches (CachedExtensionVSIXs alone ~375 MB)
+      local vscode_as=~/Library/Application\ Support/Code
+      rm -rf "$vscode_as/Cache" "$vscode_as/CachedData" "$vscode_as/CachedExtensionVSIXs" \
+             "$vscode_as/CachedProfilesData" "$vscode_as/Code Cache" \
+             "$vscode_as/GPUCache" "$vscode_as/logs" 2>/dev/null && echo "  ✓ VSCode Application Support caches removed"
+      # Remove workspaceStorage entries not accessed for >30 days
+      find "$vscode_as/User/workspaceStorage" -maxdepth 1 -mindepth 1 -type d -atime +30 -exec rm -rf {} + 2>/dev/null && echo "  ✓ VSCode stale workspaceStorage removed"
+      # Zed editor hang traces
+      rm -rf ~/Library/Application\ Support/Zed/hang_traces 2>/dev/null && echo "  ✓ Zed hang traces removed"
+      # cloud-code extension CLI binary (auto re-downloaded on next use)
+      rm -rf ~/Library/Application\ Support/cloud-code/cloudcode_cli 2>/dev/null && echo "  ✓ cloud-code CLI cache removed"
+      # VSCode WebStorage (IndexedDB / localStorage for extensions)
+      rm -rf "$vscode_as/WebStorage" 2>/dev/null && echo "  ✓ VSCode WebStorage removed"
+      # Google Updater CRX cache — Chrome auto-refills on next update check
+      rm -rf ~/Library/Application\ Support/Google/GoogleUpdater/crx_cache 2>/dev/null && echo "  ✓ GoogleUpdater CRX cache removed"
     } >"$_o" 2>&1 &
     _pids+=($!)
   fi
@@ -295,6 +329,10 @@ clean() {
       sudo atsutil databases -remove 2>/dev/null && echo "  ✓ Font cache removed"
       osascript -e 'tell application "Finder" to empty trash' 2>/dev/null && echo "  ✓ Trash emptied"
       sudo rm -rf /private/var/log/asl/*.asl 2>/dev/null && echo "  ✓ ASL system logs removed"
+      # Time Machine local snapshots — hidden reserved space, can be several GB
+      tmutil deletelocalsnapshots / 2>/dev/null && echo "  ✓ Time Machine local snapshots deleted"
+      # Unified system log database (~2-3 GB, rebuilt automatically by logd)
+      sudo log erase --all 2>/dev/null && echo "  ✓ Unified log database erased"
     } >"$_o" 2>&1 &
     _pids+=($!)
   fi
