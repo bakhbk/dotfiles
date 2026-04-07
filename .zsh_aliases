@@ -41,6 +41,12 @@ alias reload-zsh='source ~/.zshrc'
 alias rmr='rm -rf'
 alias show-path='echo $PATH | tr -s ":" "\n"'
 
+# ADB Helpers
+alias ads='adb devices'
+alias adbre='adb kill-server && adb devices'
+alias adbwifi='ID=$(adb devices | grep -v "List" | grep "device$" | grep -v ":" | sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | awk "{print \$1}" | fzf --height 20% --reverse --header "Выберите USB устройство:") && [ -n "$ID" ] && adb -s $ID tcpip 5555 && sleep 2 && IP=$(adb -s $ID shell "ip addr show wlan0 | grep \"inet \" " | sed -e "s/.*inet \([^/]*\).*/\1/" | tr -d "[:space:]") && adb connect ${IP}:5555'
+alias adboff='ID=$(adb devices | grep -v "List" | grep ":" | sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | awk "{print \$1}" | fzf --height 20% --reverse --header "Отключить Wi-Fi устройство:") && [ -n "$ID" ] && adb disconnect $ID || echo "Нет активных Wi-Fi соединений"'
+
 if [ command -v bat &> /dev/null ]; then
     alias cat='bat --theme=Nord --style=plain'
 fi
