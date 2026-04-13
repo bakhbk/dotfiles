@@ -2,8 +2,8 @@
 
 set +m  # Disable job control messages
 
-SCRIPT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-source "$SCRIPT_DIR/shared/scripts/setup/common.sh"
+SCRIPT_DIR=\"$(dirname \"${BASH_SOURCE[0]:-$0}\")\"
+source \"$SCRIPT_DIR/common.sh\"
 
 FVM_VERSION=${1:-"3.38.9"}
 

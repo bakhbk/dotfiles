@@ -1,7 +1,7 @@
 #!/bin/zsh
 
-SCRIPT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-source "$SCRIPT_DIR/shared/scripts/setup/common.sh"
+SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]:-$0}")"
+source "$SCRIPT_DIR/common.sh"
 
 FVM_VERSION=${1:-"3.38.9"}
 
@@ -14,7 +14,17 @@ cci "mjml" "brew install mjml"
 
 export PATH="$HOME/.fvm/default/bin:$PATH"
 export PATH="$HOME/.pub-cache/bin:$PATH"
-source "$SCRIPT_DIR/shared/scripts/setup/flutter_setup.sh"
+
+# === Установляем глобальную FVM версию ===
+printhead "Устанавливаем Flutter версию $FVM_VERSION..."
+fvm install "$FVM_VERSION" >/dev/null 2>&1 || true
+fvm use "$FVM_VERSION" --force -s
+
+# Android SDK Setup
+source "$SCRIPT_DIR/android_setup.sh"
+
+# Flutter Setup
+source "$SCRIPT_DIR/flutter_setup.sh"
 
 cci "protoc-gen-dart" "fvm dart pub global activate protoc_plugin 22.5.0"
 cci "flutterfire_cli" "fvm dart pub global activate flutterfire_cli"
