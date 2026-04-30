@@ -173,6 +173,26 @@ alias drestart='docker restart'
 alias dlogs='docker logs'
 alias dexec='docker exec -it'
 
+# Docker helper: choose running container with fzf and open shell
+docker-shell() {
+    local container shell
+    container=$(docker ps --format '{{.Names}}' | sort | fzf --height 40% --reverse --prompt='Container> ')
+    [[ -z "$container" ]] && return 1
+    echo "Connecting to container: $container"
+
+    shell=$(docker exec "$container" sh -c 'if command -v bash >/dev/null 2>&1; then printf bash; elif command -v ash >/dev/null 2>&1; then printf ash; else printf sh; fi' 2>/dev/null)
+    [[ -z "$shell" ]] && return 1
+
+    if [[ "$shell" == bash ]]; then
+        docker exec -it "$container" sh -lc 'cd && exec bash --rcfile "$HOME/.bashrc" -i'
+    elif [[ "$shell" == ash ]]; then
+        docker exec -it "$container" sh -lc 'cd && export ENV="$HOME/.ashrc" && exec ash -i'
+    else
+        docker exec -it "$container" sh -lc 'cd && export ENV="$HOME/.shrc" && exec sh -i'
+    fi
+}
+alias dsh='docker-shell'
+
 # Show adb commands
 alias adbi="cat ~/.zsh/adb-commands/AdbCommands"
 

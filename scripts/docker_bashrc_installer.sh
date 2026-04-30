@@ -40,14 +40,14 @@ if [ -z "$containers" ]; then
     exit 1
 fi
 
-# Function to install bashrc into a container
+# Function to install shell rc into a container
 install_bashrc() {
     local container_name=$1
     echo "Installing bashrc into container: $container_name"
-    
-    docker cp "$BASHRC_FILE" "$container_name:/tmp/basic_bashrc.sh" && \
-    docker exec "$container_name" bash -c "echo 'export CONTAINER_NAME=\"$container_name\"' > ~/.bashrc && cat /tmp/basic_bashrc.sh >> ~/.bashrc && rm /tmp/basic_bashrc.sh" > /dev/null 2>&1
-    
+
+    docker cp "$BASHRC_FILE" "$container_name:/tmp/basic_shell_rc.sh" > /dev/null 2>&1 && \
+    docker exec "$container_name" sh -c "if command -v bash >/dev/null 2>&1; then rc=~/.bashrc; elif command -v ash >/dev/null 2>&1; then rc=~/.ashrc; else rc=~/.shrc; fi; echo 'export CONTAINER_NAME=\"$container_name\"' > \"\$rc\"; echo 'if [ -f ~/.basic_shell_rc.sh ]; then . ~/.basic_shell_rc.sh; fi' >> \"\$rc\"; cat /tmp/basic_shell_rc.sh > ~/.basic_shell_rc.sh; rm -f /tmp/basic_shell_rc.sh 2>/dev/null || true" > /dev/null 2>&1
+
     if [ $? -eq 0 ]; then
         echo "✓ Successfully installed into $container_name"
         return 0
