@@ -140,12 +140,7 @@ if [[ -z "$MODELS" ]]; then
 fi
 
 # --- 3. Pick model via fzf ---
-LAST_MODEL=$(get_provider_last_model "$NAME")
-if [[ -n "$LAST_MODEL" ]]; then
-  MODEL=$(echo "$MODELS" | fzf --preview 'echo {}' --query "$LAST_MODEL")
-else
-  MODEL=$(echo "$MODELS" | fzf --preview 'echo {}')
-fi
+MODEL=$(echo "$MODELS" | fzf --preview 'echo {}')
 [[ -z "$MODEL" ]] && echo "No model selected." && exit 1
 
 # --- 4. Save provider config ---
