@@ -59,6 +59,39 @@ last_model=${model}
 EOF
 }
 
+# --- Parse flags ---
+CONTINUE=0
+while getopts "c" opt; do
+  case $opt in
+    c) CONTINUE=1 ;;
+    *) ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+# --- Continue mode: use last saved config ---
+if [[ "$CONTINUE" -eq 1 ]]; then
+  if [[ ! -f "$CONFIG_FILE" ]] || [[ -z "$(get_provider_names)" ]]; then
+    echo "No providers configured. Run without -c first."
+    exit 1
+  fi
+  NAMES=$(get_provider_names)
+  NAME=$(echo "$NAMES" | fzf --preview 'echo {}')
+  [[ -z "$NAME" ]] && echo "Aborted." && exit 1
+  BASE_URL=$(get_provider_url "$NAME")
+  API_KEY=$(get_provider_key "$NAME")
+  MODEL=$(get_provider_last_model "$NAME")
+  if [[ -z "$BASE_URL" || -z "$MODEL" ]]; then
+    echo "Incomplete config for provider '$NAME'. Run without -c to reconfigure."
+    exit 1
+  fi
+  exec env \
+    COPILOT_PROVIDER_BASE_URL="$BASE_URL" \
+    COPILOT_PROVIDER_API_KEY="$API_KEY" \
+    COPILOT_MODEL="$MODEL" \
+    copilot --continue
+fi
+
 # --- 1. Choose or add a provider ---
 if [[ ! -f "$CONFIG_FILE" ]]; then
   touch "$CONFIG_FILE"
