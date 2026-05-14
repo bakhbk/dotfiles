@@ -3,7 +3,7 @@
 SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]:-$0}")"
 source "$SCRIPT_DIR/common.sh"
 
-FVM_VERSION=${1:-"3.38.9"}
+FVM_VERSION=${1:-"3.41.9"}
 
 cci "brew" "/bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
 cci "fvm" "curl -fsSL https://fvm.app/install.sh | bash"

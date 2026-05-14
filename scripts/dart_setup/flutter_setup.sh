@@ -5,7 +5,7 @@ set +m  # Disable job control messages
 SCRIPT_DIR=\"$(dirname \"${BASH_SOURCE[0]:-$0}\")\"
 source \"$SCRIPT_DIR/common.sh\"
 
-FVM_VERSION=${1:-"3.38.9"}
+FVM_VERSION=${1:-"3.41.9"}
 
 printhead "Настраиваем асинхронно Flutter [fvm version $FVM_VERSION] проекты..."
 
