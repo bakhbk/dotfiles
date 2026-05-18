@@ -1,63 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONFIG_DIR="$HOME/.config/copilot-run"
-CONFIG_FILE="$CONFIG_DIR/providers.conf"
+# Source shared utilities (INI parser, fzf helper, JSON escaping)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$HOME/own_projects/agent-launcher"
 
-mkdir -p "$CONFIG_DIR"
+if [[ -f "$PROJECT_DIR/src/shared.sh" ]]; then
+  source "$PROJECT_DIR/src/shared.sh"
+else
+  # Fallback: inline config path for standalone use
+  DISPATCH_CONFIG_DIR="${DISPATCH_CONFIG_DIR:-$HOME/.config/dispatch}"
+  DISPATCH_CONFIG_FILE="${DISPATCH_CONFIG_DIR}/providers.conf"
+  mkdir -p "$DISPATCH_CONFIG_DIR"
+  [[ -f "$DISPATCH_CONFIG_FILE" ]] || touch "$DISPATCH_CONFIG_FILE"
 
-# --- INI-style helpers ---
-get_provider_names() {
-  grep '^\[' "$CONFIG_FILE" 2>/dev/null | sed 's/\[//;s/\]//' || true
-}
+  get_provider_names() {
+    grep '^\[' "$DISPATCH_CONFIG_FILE" 2>/dev/null | sed 's/\[//;s/\]//' || true
+  }
+  get_provider_url()       { awk -v s="[${1}]" '$0==s{f=1;next}/^\[/{f=0}f&&/^url=/{sub(/^url=/,"" );print}' "$DISPATCH_CONFIG_FILE"; }
+  get_provider_key()       { awk -v s="[${1}]" '$0==s{f=1;next}/^\[/{f=0}f&&/^key=/{sub(/^key=/,"" );print}' "$DISPATCH_CONFIG_FILE"; }
+  get_provider_last_model(){ awk -v s="[${1}]" '$0==s{f=1;next}/^\[/{f=0}f&&/^last_model=/{sub(/^last_model=/,"" );print}' "$DISPATCH_CONFIG_FILE"; }
+  save_provider() { true; }  # not used in copilot.sh flow
+fi
 
-get_provider_url() {
-  local name="$1"
-  awk -v name="[${name}]" '
-    $0 == name { found=1; next }
-    /^\[/ { found=0 }
-    found && /^url=/ { sub(/^url=/, ""); print }
-  ' "$CONFIG_FILE"
-}
-
-get_provider_key() {
-  local name="$1"
-  awk -v name="[${name}]" '
-    $0 == name { found=1; next }
-    /^\[/ { found=0 }
-    found && /^key=/ { sub(/^key=/, ""); print }
-  ' "$CONFIG_FILE"
-}
-
-get_provider_last_model() {
-  local name="$1"
-  awk -v name="[${name}]" '
-    $0 == name { found=1; next }
-    /^\[/ { found=0 }
-    found && /^last_model=/ { sub(/^last_model=/, ""); print }
-  ' "$CONFIG_FILE"
-}
-
-save_provider() {
-  local name="$1" url="$2" key="$3" model="$4"
-  # Remove existing section if present
-  if grep -q "^\[${name}\]" "$CONFIG_FILE" 2>/dev/null; then
-    local tmp
-    tmp=$(awk -v name="[${name}]" '
-      $0 == name { skip=1; next }
-      /^\[/ { skip=0 }
-      !skip { print }
-    ' "$CONFIG_FILE")
-    printf '%s\n' "$tmp" > "$CONFIG_FILE"
-  fi
-  cat >> "$CONFIG_FILE" <<EOF
-
-[${name}]
-url=${url}
-key=${key}
-last_model=${model}
-EOF
-}
+# Alias for copilot.sh legacy
+CONFIG_DIR="$DISPATCH_CONFIG_DIR"
+CONFIG_FILE="$DISPATCH_CONFIG_FILE"
 
 # --- Parse flags ---
 CONTINUE=0
