@@ -34,18 +34,10 @@ ZED_PROVIDER_MAP = {
 
 # Дефолтные параметры модели для Zed
 ZED_MODEL_DEFAULTS = {
+    "display_name": None,  # заполняется из name если не задан
+    "max_tokens": 200000,
     "supports_tool_calls": True,
     "supports_images": False,
-    "max_tokens": 200000,
-    "max_completion_tokens": 200000,
-    "capabilities": {
-        "tools": True,
-        "images": False,
-        "parallel_tool_calls": True,
-        "prompt_cache_key": True,
-        "chat_completions": True,
-        "interleaved_reasoning": False,
-    },
 }
 
 # Дефолтные значения для apiKey в pi models.json
@@ -408,13 +400,16 @@ def sync_to_zed(provider_name: str, provider_cfg: dict, model_ids: list[str], ca
             if existing.get("supports_images") != caps["vision"]:
                 existing["supports_images"] = caps["vision"]
                 needs_update = True
+            # Удаляем старые поля, которые не нужны Zed
             if "capabilities" in existing:
-                if existing["capabilities"].get("tools") != caps["tools"]:
-                    existing["capabilities"]["tools"] = caps["tools"]
-                    needs_update = True
-                if existing["capabilities"].get("images") != caps["vision"]:
-                    existing["capabilities"]["images"] = caps["vision"]
-                    needs_update = True
+                del existing["capabilities"]
+                needs_update = True
+            if "max_completion_tokens" in existing:
+                del existing["max_completion_tokens"]
+                needs_update = True
+            # Добавляем display_name если нет
+            if "display_name" not in existing:
+                existing["display_name"] = model_id.split("/")[-1]
             if needs_update:
                 print(f"  zed ({provider_name}): ~{model_id}")
                 updated += 1
@@ -423,6 +418,7 @@ def sync_to_zed(provider_name: str, provider_cfg: dict, model_ids: list[str], ca
             model_data = {
                 **ZED_MODEL_DEFAULTS,
                 "name": model_id,
+                "display_name": model_id.split("/")[-1],
             }
             apply_capabilities(model_data, caps)
             sub_provider.setdefault("available_models", []).append(model_data)
