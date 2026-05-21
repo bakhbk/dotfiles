@@ -10,6 +10,7 @@ import configparser
 import json
 import re
 import sys
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -318,8 +319,24 @@ def sync_to_opencode(provider_name: str, provider_cfg: dict, model_ids: list[str
 
     provider = config["provider"].setdefault(provider_key, {
         "name": provider_key.capitalize(),
+        "api": "openai-completions",
+        "npm": "@ai-sdk/openai-compatible",
+        "options": {"baseURL": provider_cfg["url"]},
         "models": {},
     })
+
+    if provider.get("name") != provider_key.capitalize():
+        provider["name"] = provider_key.capitalize()
+    if provider.get("api") != "openai-completions":
+        provider["api"] = "openai-completions"
+    if provider.get("npm") != "@ai-sdk/openai-compatible":
+        provider["npm"] = "@ai-sdk/openai-compatible"
+    if provider.get("options", {}).get("baseURL") != provider_cfg["url"]:
+        provider.setdefault("options", {})["baseURL"] = provider_cfg["url"]
+    if provider_cfg.get("key"):
+        provider.setdefault("options", {})["apiKey"] = provider_cfg["key"]
+    elif provider.get("options") and "apiKey" in provider["options"]:
+        del provider["options"]["apiKey"]
 
     existing_ids = set(provider.get("models", {}).keys())
     active_ids = {m for m in model_ids if not m.startswith("text-embedding")}
@@ -421,6 +438,23 @@ def sync_to_zed(provider_name: str, provider_cfg: dict, model_ids: list[str], ca
     return added, updated, removed
 
 
+def normalize_provider_url(url: str) -> str:
+    url = url.strip().rstrip("/")
+    if not url or url.lower() in {"undefined", "null", "none"}:
+        return ""
+
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+
+    return url
+
+
+def normalize_api_key(key: str) -> str:
+    key = key.strip()
+    return "" if key.lower() in {"undefined", "null", "none"} else key
+
+
 def parse_providers_conf() -> dict:
     """Парсит providers.conf и возвращает словарь {имя_провайдера: config_dict}."""
     if not PROVIDERS_CONF.exists():
@@ -432,9 +466,13 @@ def parse_providers_conf() -> dict:
 
     providers = {}
     for section in config.sections():
+        url = normalize_provider_url(config.get(section, "url", fallback=""))
+        if not url:
+            print(f"  пропуск провайдера {section}: неверный или отсутствующий URL")
+            continue
         providers[section] = {
-            "url": config.get(section, "url", fallback="").rstrip("/"),
-            "key": config.get(section, "key", fallback=""),
+            "url": url,
+            "key": normalize_api_key(config.get(section, "key", fallback="")),
         }
     return providers
 
