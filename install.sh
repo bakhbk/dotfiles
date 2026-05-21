@@ -6,31 +6,31 @@
 set -euxo pipefail
 
 # Extracted clipboard helper installer
-./.install_clipboard_helpers.sh || true
+./installers/install_clipboard_helpers.sh || true
 
 CONFIGS=(
-  .zsh_aliases
-  .zsh_tools
-  .zshenv
-  .zshrc
-  .install-oh-my-zsh.sh
-  .shell_prompt
-  .git_checkout_branch.sh
-  .git_delete_branch.sh
-  .tmux_session_selector.sh
-  .nvmv.sh
-  .minimal.zshrc
-  .create_tmux_session.sh
-  .commit.sh
-  .fvm_tools.sh
-  .ollama_fzf.sh
-  .clean.sh
+  shell/zsh_aliases
+  shell/zsh_tools
+  shell/zshenv
+  shell/zshrc
+  installers/install-oh-my-zsh.sh
+  shell/shell_prompt
+  git/git_checkout_branch.sh
+  git/git_delete_branch.sh
+  tmux/tmux_session_selector.sh
+  shell/nvmv.sh
+  shell/minimal.zshrc
+  tmux/create_tmux_session.sh
+  utils/commit.sh
+  utils/fvm_tools.sh
+  ollama/ollama_fzf.sh
+  utils/clean.sh
 )
 
 # Configs that should be copied to the home directory.
 CONFIGS_HOME_DIR=(
-  .tmux.conf
-  .zshrc
+  tmux/tmux.conf
+  shell/zshrc
 )
 
 if [ $# -eq 0 ]; then
@@ -44,7 +44,7 @@ if [ $# -eq 0 ]; then
 
 fi
 
-./.install-oh-my-zsh.sh
-./.install_fzf.sh
+./installers/install-oh-my-zsh.sh
+./installers/install_fzf.sh
 
 exit 0

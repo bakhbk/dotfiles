@@ -1,6 +1,9 @@
 # OS X trash
 .DS_Store
 
+# Node.js dependencies
+node_modules/
+
 # Vim swap files
 [._]*.s[a-v][a-z]
 [._]*.sw[a-p]
@@ -183,4 +186,3 @@ fabric.properties
 .ionide
 
 # End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,android,intellij
-
