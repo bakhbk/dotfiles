@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Запуск: uv run ~/dotfiles/scripts/sync-models.py
 """Синхронизирует модели из провайдеров в pi models.json, kilo.jsonc, opencode.jsonc и Zed settings.json.
 
 Читает провайдеры из ~/.config/dispatch/providers.conf (тот же источник правды, что и copilot.sh),
@@ -37,6 +38,7 @@ ZED_PROVIDER_MAP = {
 ZED_MODEL_DEFAULTS = {
     "display_name": None,  # заполняется из name если не задан
     "max_tokens": 200000,
+    "max_completion_tokens": 200000,
     "supports_tool_calls": True,
     "supports_images": False,
 }
@@ -137,19 +139,25 @@ def parse_capabilities_table(path: Path) -> dict:
     return capabilities
 
 
+def zed_model_capabilities(caps: dict) -> dict:
+    return {
+        "tools": caps.get("tools", True),
+        "images": caps.get("vision", False),
+        "parallel_tool_calls": caps.get("tools", True),
+        "prompt_cache_key": caps.get("tools", True),
+        "chat_completions": True,
+        "interleaved_reasoning": False,
+    }
+
+
 def apply_capabilities(model: dict, caps: dict) -> None:
     """Применяет capabilities из таблицы к модели (overrides defaults)."""
     if not caps:
         return
 
-    # Zed: supports_tool_calls, supports_images
     model["supports_tool_calls"] = caps.get("tools", True)
     model["supports_images"] = caps.get("vision", False)
-
-    # Zed capabilities sub-object
-    if "capabilities" in model:
-        model["capabilities"]["tools"] = caps.get("tools", True)
-        model["capabilities"]["images"] = caps.get("vision", False)
+    model["capabilities"] = zed_model_capabilities(caps)
 
 
 def write_json(path: Path, data: dict) -> None:
@@ -375,16 +383,18 @@ def sync_to_zed(provider_name: str, provider_cfg: dict, model_ids: list[str], ca
     else:
         target = language_models.setdefault("openai_compatible", {})
 
+    zed_url = normalize_zed_api_url(provider_cfg["url"])
+
     if provider_name not in ZED_PROVIDER_MAP:
         sub_provider = target.setdefault(provider_name, {
-            "api_url": provider_cfg["url"],
+            "api_url": zed_url,
             "available_models": [],
         })
     else:
         sub_provider = target
 
-    if "api_url" in sub_provider and sub_provider["api_url"] != provider_cfg["url"]:
-        sub_provider["api_url"] = provider_cfg["url"]
+    if sub_provider.get("api_url") != zed_url:
+        sub_provider["api_url"] = zed_url
 
     active_ids = {m for m in model_ids if not m.startswith("text-embedding")}
 
@@ -404,11 +414,12 @@ def sync_to_zed(provider_name: str, provider_cfg: dict, model_ids: list[str], ca
             if existing.get("supports_images") != caps["vision"]:
                 existing["supports_images"] = caps["vision"]
                 needs_update = True
-            if "capabilities" in existing:
-                del existing["capabilities"]
+            new_capabilities = zed_model_capabilities(caps)
+            if existing.get("capabilities") != new_capabilities:
+                existing["capabilities"] = new_capabilities
                 needs_update = True
-            if "max_completion_tokens" in existing:
-                del existing["max_completion_tokens"]
+            if existing.get("max_completion_tokens") != ZED_MODEL_DEFAULTS["max_completion_tokens"]:
+                existing["max_completion_tokens"] = ZED_MODEL_DEFAULTS["max_completion_tokens"]
                 needs_update = True
             if "display_name" not in existing:
                 existing["display_name"] = model_id.split("/")[-1]
@@ -453,6 +464,14 @@ def normalize_provider_url(url: str) -> str:
 def normalize_api_key(key: str) -> str:
     key = key.strip()
     return "" if key.lower() in {"undefined", "null", "none"} else key
+
+
+def normalize_zed_api_url(url: str) -> str:
+    url = url.strip().rstrip("/")
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return url
+    return f"{parsed.scheme}://{parsed.netloc}/api/v0"
 
 
 def parse_providers_conf() -> dict:
