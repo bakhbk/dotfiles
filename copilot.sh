@@ -115,9 +115,109 @@ MODEL=$(echo "$MODELS" | fzf --preview 'echo {}')
 save_provider "$NAME" "$BASE_URL" "$API_KEY" "$MODEL"
 echo "Saved: provider=$NAME model=$MODEL"
 
-# --- 5. Launch copilot ---
-exec env \
-  COPILOT_PROVIDER_BASE_URL="$BASE_URL" \
-  COPILOT_PROVIDER_API_KEY="$API_KEY" \
-  COPILOT_MODEL="$MODEL" \
-  copilot
+# --- 5. Choose action: copilot or commit-ai ---
+echo ""
+ACTIONS="copilot
+commit-ai"
+ACTION=$(echo "$ACTIONS" | fzf --preview 'echo {}')
+[[ -z "$ACTION" ]] && echo "Aborted." && exit 1
+
+if [[ "$ACTION" == "copilot" ]]; then
+  exec env \
+    COPILOT_PROVIDER_BASE_URL="$BASE_URL" \
+    COPILOT_PROVIDER_API_KEY="$API_KEY" \
+    COPILOT_MODEL="$MODEL" \
+    copilot
+elif [[ "$ACTION" == "commit-ai" ]]; then
+  # --- commit-ai: generate commit message via LLM ---
+  if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    echo "❌ Not in a git repository"
+    exit 1
+  fi
+
+  if git diff --cached --quiet; then
+    echo "❌ No staged changes to commit"
+    exit 1
+  fi
+
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "❌ curl is required"
+    exit 1
+  fi
+
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "❌ jq is required"
+    exit 1
+  fi
+
+  diff="$(git diff --staged)"
+  if [[ -z "$diff" ]]; then
+    echo "❌ No staged changes to commit"
+    exit 1
+  fi
+
+  echo "🤖 Generating commit message..."
+
+  payload=$(jq -n --arg diff "$diff" --arg model "$MODEL" '{
+    model: $model,
+    messages: [
+      {role: "system", content: "Output ONLY a git commit message. First line MUST start with one of these exact words: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert. Then a colon and space, then the description. Example: feat(auth): add login page\n\nDo NOT output any other text before or after the commit message. No greetings, no explanations, no conversational phrases like I will, Let me, Here is."},
+      {role: "user", content: ("Generate a commit message for this diff:\n\n" + $diff)}
+    ],
+    max_tokens: 1000,
+    temperature: 0.2
+  }')
+
+  if [[ -n "$API_KEY" ]]; then
+    response=$(curl -fsS -H "Content-Type: application/json" -H "Authorization: Bearer ${API_KEY}" -d "$payload" "${BASE_URL}/chat/completions" 2>&1 || true)
+  else
+    response=$(curl -fsS -H "Content-Type: application/json" -d "$payload" "${BASE_URL}/chat/completions" 2>&1 || true)
+  fi
+
+  if [[ -z "$response" ]] || ! printf '%s' "$response" | jq -e '.choices' >/dev/null 2>&1; then
+    echo "❌ API request failed"
+    exit 1
+  fi
+
+  message=$(printf '%s' "$response" | jq -r '
+    def fallback_message:
+      (.choices[0].message.reasoning_content // "" | split("\n")
+        | map(select(length > 0 and
+          (contains("feat") or contains("fix") or contains("docs") or contains("style") or contains("refactor") or contains("perf") or contains("test") or contains("build") or contains("ci") or contains("chore") or contains("revert")) ))
+        | last // "");
+
+    if (.choices[0].message.content // "" | tostring | gsub("^\\s+|\\s+$"; "")) != "" then
+      (.choices[0].message.content | gsub("`"; "") )
+    else
+      (fallback_message | gsub("`"; "") | gsub("Draft: "; ""))
+    end
+  ')
+
+  # message="$(printf '%s' "$message" | sed -e '/./,$!d')"
+
+  if [[ -z "$message" ]]; then
+    echo "❌ Failed to generate commit message"
+    exit 1
+  fi
+
+  # Add signoff for preview
+  name=$(git config user.name)
+  email=$(git config user.email)
+  if [ -n "$name" ] && [ -n "$email" ]; then
+    message="$message"$'\n\n'"Signed-off-by: $name <$email>"
+  fi
+
+  echo
+  echo "📝 Generated commit message:"
+  echo "=================================="
+  echo "$message"
+  echo "=================================="
+
+  read -r -p "Create commit? [y/N]: " confirm
+  if [[ "$confirm" == [yYдД] ]]; then
+    git commit -m "$message"
+    echo "✅ Commit created!"
+  else
+    echo "❌ Commit canceled"
+  fi
+fi
