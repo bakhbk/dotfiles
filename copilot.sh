@@ -17,10 +17,10 @@ else
   get_provider_names() {
     grep '^\[' "$DISPATCH_CONFIG_FILE" 2>/dev/null | sed 's/\[//;s/\]//' || true
   }
-  get_provider_url()       { awk -v s="[${1}]" '$0==s{f=1;next}/^\[/{f=0}f&&/^url=/{sub(/^url=/,"" );print}' "$DISPATCH_CONFIG_FILE"; }
-  get_provider_key()       { awk -v s="[${1}]" '$0==s{f=1;next}/^\[/{f=0}f&&/^key=/{sub(/^key=/,"" );print}' "$DISPATCH_CONFIG_FILE"; }
-  get_provider_last_model(){ awk -v s="[${1}]" '$0==s{f=1;next}/^\[/{f=0}f&&/^last_model=/{sub(/^last_model=/,"" );print}' "$DISPATCH_CONFIG_FILE"; }
-  save_provider() { true; }  # not used in copilot.sh flow
+  get_provider_url() { awk -v s="[${1}]" '$0==s{f=1;next}/^\[/{f=0}f&&/^url=/{sub(/^url=/,"" );print}' "$DISPATCH_CONFIG_FILE"; }
+  get_provider_key() { awk -v s="[${1}]" '$0==s{f=1;next}/^\[/{f=0}f&&/^key=/{sub(/^key=/,"" );print}' "$DISPATCH_CONFIG_FILE"; }
+  get_provider_last_model() { awk -v s="[${1}]" '$0==s{f=1;next}/^\[/{f=0}f&&/^last_model=/{sub(/^last_model=/,"" );print}' "$DISPATCH_CONFIG_FILE"; }
+  save_provider() { true; } # not used in copilot.sh flow
 fi
 
 # Alias for copilot.sh legacy
@@ -31,8 +31,8 @@ CONFIG_FILE="$DISPATCH_CONFIG_FILE"
 CONTINUE=0
 while getopts "c" opt; do
   case $opt in
-    c) CONTINUE=1 ;;
-    *) ;;
+  c) CONTINUE=1 ;;
+  *) ;;
   esac
 done
 shift $((OPTIND - 1))
@@ -95,11 +95,11 @@ fi
 # --- 2. Fetch models ---
 echo "Fetching models..."
 if [[ -n "$API_KEY" ]]; then
-  MODELS=$(curl -s -H "Authorization: Bearer $API_KEY" "${BASE_URL}/models" \
-    | jq -r '.data[].id // empty' 2>/dev/null)
+  MODELS=$(curl -s -H "Authorization: Bearer $API_KEY" "${BASE_URL}/models" |
+    jq -r '.data[].id // empty' 2>/dev/null)
 else
-  MODELS=$(curl -s "${BASE_URL}/models" \
-    | jq -r '.data[].id // empty' 2>/dev/null)
+  MODELS=$(curl -s "${BASE_URL}/models" |
+    jq -r '.data[].id // empty' 2>/dev/null)
 fi
 
 if [[ -z "$MODELS" ]]; then
@@ -193,7 +193,7 @@ elif [[ "$ACTION" == "commit-ai" ]]; then
     end
   ')
 
-  # message="$(printf '%s' "$message" | sed -e '/./,$!d')"
+  message="$(printf '%s' "$message" | sed -e '/./,$!d')"
 
   if [[ -z "$message" ]]; then
     echo "❌ Failed to generate commit message"
