@@ -3,6 +3,7 @@
 """Синхронизирует модели из провайдеров в pi models.json, kilo.jsonc, opencode.jsonc и Zed settings.json.
 
 Читает провайдеры из ~/.config/dispatch/providers.conf (тот же источник правды, что и copilot.sh),
+использует ~/.config/dispatch/model-capabilities.yaml для сведений о возможностях моделей,
 fetchит модели через OpenAI-compatible endpoint для каждого провайдера,
 и синхронизирует в pi models.json, kilo.jsonc, opencode.jsonc и Zed settings.json.
 """
@@ -52,7 +53,7 @@ PI_API_KEY_DEFAULTS = {
 REQUEST_TIMEOUT = 10
 
 # Путь к таблице capabilities
-MODEL_CAPABILITIES_FILE = Path.home() / ".config" / "dispatch" / "model-capabilities.md"
+MODEL_CAPABILITIES_YAML = Path.home() / ".config" / "dispatch" / "model-capabilities.yaml"
 
 # Дефолтные capabilities для моделей, которых нет в таблице
 CAPABILITIES_DEFAULTS = {
@@ -101,40 +102,48 @@ def read_jsonc(path: Path) -> dict:
     return json.loads(cleaned)
 
 
-def parse_capabilities_table(path: Path) -> dict:
-    """Парсит model-capabilities.md и возвращает {model_id: {vision, tools, web}}."""
+def parse_capabilities_yaml(path: Path) -> dict:
+    """Парсит model-capabilities.yaml и возвращает {model_id: {vision, tools, web}}."""
     if not path.exists():
         return {}
 
     raw = path.read_text(encoding="utf-8")
-    lines = raw.split("\n")
-
-    # Находим строку с заголовком таблицы
-    table_start = -1
-    for i, line in enumerate(lines):
-        if "| Название модели" in line:
-            table_start = i
-            break
-
-    if table_start < 0:
-        return {}
-
     capabilities = {}
-    for line in lines[table_start + 2:]:  # пропускаем заголовок и разделитель
-        line = line.strip()
-        if not line or not line.startswith("|"):
+    current_model = None
+    current_indent = None
+    in_models = False
+
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
             continue
-        parts = [p.strip() for p in line.split("|")[1:-1]]
-        if len(parts) >= 4:
-            model_id = parts[0]
-            vision = "✅" in parts[1]
-            tools = "✅" in parts[2]
-            web = "✅" in parts[3]
-            capabilities[model_id] = {
-                "vision": vision,
-                "tools": tools,
-                "web": web,
-            }
+
+        if not in_models:
+            if stripped == "models:":
+                in_models = True
+            continue
+
+        model_match = re.match(r"^(\s+)([^:\s][^:]*):\s*$", line)
+        if model_match:
+            current_indent = len(model_match.group(1))
+            current_model = model_match.group(2).strip()
+            capabilities[current_model] = {}
+            continue
+
+        field_match = re.match(r"^(\s+)([^:\s][^:]*):\s*(.+)$", line)
+        if field_match and current_model is not None:
+            indent = len(field_match.group(1))
+            if indent <= current_indent:
+                current_model = None
+                continue
+            key = field_match.group(2).strip()
+            value = field_match.group(3).strip().lower()
+            if value in {"true", "yes", "y", "1"}:
+                capabilities[current_model][key] = True
+            elif value in {"false", "no", "n", "0"}:
+                capabilities[current_model][key] = False
+            else:
+                capabilities[current_model][key] = value
 
     return capabilities
 
@@ -315,7 +324,7 @@ def sync_to_kilo(provider_name: str, provider_cfg: dict, model_ids: list[str], c
     return added, updated, removed
 
 
-def sync_to_opencode(provider_name: str, provider_cfg: dict, model_ids: list[str]) -> tuple[int, int]:
+def sync_to_opencode(provider_name: str, provider_cfg: dict, model_ids: list[str], capabilities: dict) -> tuple[int, int]:
     """Синхронизирует модели в opencode.jsonc (если файл существует)."""
     if not OPENCODE_CONFIG.exists():
         print(f"opencode.jsonc не найден: {OPENCODE_CONFIG}")
@@ -350,11 +359,33 @@ def sync_to_opencode(provider_name: str, provider_cfg: dict, model_ids: list[str
     active_ids = {m for m in model_ids if not m.startswith("text-embedding")}
 
     added = 0
+    updated = 0
     for model_id in model_ids:
         if model_id.startswith("text-embedding"):
             continue
-        if model_id not in existing_ids:
-            provider["models"][model_id] = {"name": model_id}
+        caps = capabilities.get(model_id, CAPABILITIES_DEFAULTS)
+        modalities = {
+            "input": ["image", "text"] if caps.get("vision") else ["text"],
+            "output": ["text"],
+        }
+
+        existing = provider["models"].get(model_id)
+        if existing:
+            needs_update = False
+            if existing.get("name") != model_id:
+                existing["name"] = model_id
+                needs_update = True
+            if existing.get("modalities") != modalities:
+                existing["modalities"] = modalities
+                needs_update = True
+            if needs_update:
+                print(f"  opencode ({provider_key}): ~{model_id}")
+                updated += 1
+        else:
+            provider["models"][model_id] = {
+                "name": model_id,
+                "modalities": modalities,
+            }
             print(f"  opencode ({provider_key}): +{model_id}")
             added += 1
 
@@ -499,10 +530,13 @@ def parse_providers_conf() -> dict:
 def main() -> None:
     print(f"Читаю провайдеры из {PROVIDERS_CONF}")
 
-    # Парсим таблицу capabilities
-    capabilities = parse_capabilities_table(MODEL_CAPABILITIES_FILE)
-    if capabilities:
-        print(f"Загружено {len(capabilities)} моделей из таблицы capabilities")
+    # Парсим YAML capabilities
+    if MODEL_CAPABILITIES_YAML.exists():
+        capabilities = parse_capabilities_yaml(MODEL_CAPABILITIES_YAML)
+        print(f"Загружено {len(capabilities)} моделей из YAML capabilities")
+    else:
+        capabilities = {}
+        print(f"Не найден {MODEL_CAPABILITIES_YAML}, capabilities не загружены")
 
     providers = parse_providers_conf()
 
@@ -528,7 +562,7 @@ def main() -> None:
 
         added_pi, updated_pi, removed_pi = sync_to_pi(provider_name, provider_cfg, model_ids, capabilities)
         added_kilo, updated_kilo, removed_kilo = sync_to_kilo(provider_name, provider_cfg, model_ids, capabilities)
-        added_opencode, removed_opencode = sync_to_opencode(provider_name, provider_cfg, model_ids)
+        added_opencode, removed_opencode = sync_to_opencode(provider_name, provider_cfg, model_ids, capabilities)
         added_zed, updated_zed, removed_zed = sync_to_zed(provider_name, provider_cfg, model_ids, capabilities)
 
         total_added += added_pi + added_kilo + added_opencode + added_zed
