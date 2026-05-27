@@ -207,17 +207,19 @@ elif [[ "$ACTION" == "commit-ai" ]]; then
     message="$message"$'\n\n'"Signed-off-by: $name <$email>"
   fi
 
-  echo
-  echo "📝 Generated commit message:"
-  echo "=================================="
-  echo "$message"
-  echo "=================================="
+   # Open in editor for review/edit (empty = cancel)
+   tmpmsg=$(mktemp)
+   printf '%s\n' "$message" > "$tmpmsg"
+   trap 'rm -f "$tmpmsg"' EXIT
 
-  read -r -p "Create commit? [y/N]: " confirm
-  if [[ "$confirm" == [yYдД] ]]; then
-    git commit -m "$message"
-    echo "✅ Commit created!"
-  else
-    echo "❌ Commit canceled"
-  fi
+   echo "📝 Opening editor (save+quit to commit, empty file to cancel)..."
+   "${EDITOR:-vi}" "$tmpmsg"
+
+   edited=$(cat "$tmpmsg")
+   if [[ -z "$(printf '%s' "$edited" | tr -d '[:space:]')" ]]; then
+     echo "❌ Commit canceled (message empty)"
+   else
+     git commit -m "$edited"
+     echo "✅ Commit created!"
+   fi
 fi
