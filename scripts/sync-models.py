@@ -201,11 +201,11 @@ def fetch_models(url: str, api_key: str = "") -> list[str]:
 
 def sync_to_pi(provider_name: str, provider_cfg: dict, model_ids: list[str], capabilities: dict) -> tuple[int, int, int]:
     """Синхронизирует модели в pi models.json."""
-    if not PI_MODELS.exists():
-        print(f"pi models.json не найден: {PI_MODELS}")
-        return 0, 0, 0
+    if PI_MODELS.exists():
+        models = read_jsonc(PI_MODELS)
+    else:
+        models = {"providers": {}}
 
-    models = read_jsonc(PI_MODELS)
     providers = models.setdefault("providers", {})
 
     expected_key = provider_cfg.get("key") or PI_API_KEY_DEFAULTS.get(provider_name, "")
@@ -215,6 +215,7 @@ def sync_to_pi(provider_name: str, provider_cfg: dict, model_ids: list[str], cap
         "apiKey": expected_key,
         "models": [],
     })
+    provider.setdefault("models", [])
 
     if provider.get("baseUrl") != provider_cfg["url"]:
         provider["baseUrl"] = provider_cfg["url"]
@@ -266,7 +267,6 @@ def sync_to_pi(provider_name: str, provider_cfg: dict, model_ids: list[str], cap
 def sync_to_kilo(provider_name: str, provider_cfg: dict, model_ids: list[str], capabilities: dict) -> tuple[int, int, int]:
     """Синхронизирует модели в kilo.jsonc."""
     if not KILO_CONFIG.exists():
-        print(f"kilo.jsonc не найден: {KILO_CONFIG}")
         return 0, 0, 0
 
     config = read_jsonc(KILO_CONFIG)
@@ -279,6 +279,7 @@ def sync_to_kilo(provider_name: str, provider_cfg: dict, model_ids: list[str], c
         "options": {"baseURL": provider_cfg["url"]},
         "models": {},
     })
+    provider.setdefault("models", {})
 
     if provider.get("options", {}).get("baseURL") != provider_cfg["url"]:
         provider.setdefault("options", {})["baseURL"] = provider_cfg["url"]
@@ -327,7 +328,6 @@ def sync_to_kilo(provider_name: str, provider_cfg: dict, model_ids: list[str], c
 def sync_to_opencode(provider_name: str, provider_cfg: dict, model_ids: list[str], capabilities: dict) -> tuple[int, int]:
     """Синхронизирует модели в opencode.jsonc (если файл существует)."""
     if not OPENCODE_CONFIG.exists():
-        print(f"opencode.jsonc не найден: {OPENCODE_CONFIG}")
         return 0, 0
 
     config = read_jsonc(OPENCODE_CONFIG)
@@ -341,6 +341,7 @@ def sync_to_opencode(provider_name: str, provider_cfg: dict, model_ids: list[str
         "options": {"baseURL": provider_cfg["url"]},
         "models": {},
     })
+    provider.setdefault("models", {})
 
     if provider.get("name") != provider_key.capitalize():
         provider["name"] = provider_key.capitalize()
@@ -403,7 +404,6 @@ def sync_to_opencode(provider_name: str, provider_cfg: dict, model_ids: list[str
 def sync_to_zed(provider_name: str, provider_cfg: dict, model_ids: list[str], capabilities: dict) -> tuple[int, int, int]:
     """Синхронизирует модели в Zed settings.json."""
     if not ZED_SETTINGS.exists():
-        print(f"zed settings.json не найден: {ZED_SETTINGS}")
         return 0, 0, 0
 
     config = read_jsonc(ZED_SETTINGS)

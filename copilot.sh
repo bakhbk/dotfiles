@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'echo "❌ Error on line $LINENO (exit code $?)" >&2' ERR
 
 # Source shared utilities (INI parser, fzf helper, JSON escaping)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,7 +21,25 @@ else
   get_provider_url() { awk -v s="[${1}]" '$0==s{f=1;next}/^\[/{f=0}f&&/^url=/{sub(/^url=/,"" );print}' "$DISPATCH_CONFIG_FILE"; }
   get_provider_key() { awk -v s="[${1}]" '$0==s{f=1;next}/^\[/{f=0}f&&/^key=/{sub(/^key=/,"" );print}' "$DISPATCH_CONFIG_FILE"; }
   get_provider_last_model() { awk -v s="[${1}]" '$0==s{f=1;next}/^\[/{f=0}f&&/^last_model=/{sub(/^last_model=/,"" );print}' "$DISPATCH_CONFIG_FILE"; }
-  save_provider() { true; } # not used in copilot.sh flow
+  save_provider() {
+    local name="$1" url="$2" key="$3" model="$4"
+    if grep -q "^\[${name}\]" "$DISPATCH_CONFIG_FILE" 2>/dev/null; then
+      local tmp
+      tmp=$(awk -v section="[${name}]" '
+        $0 == section { skip=1; next }
+        /^\[/ { skip=0 }
+        !skip { print }
+      ' "$DISPATCH_CONFIG_FILE")
+      printf '%s\n' "$tmp" > "$DISPATCH_CONFIG_FILE"
+    fi
+    cat >> "$DISPATCH_CONFIG_FILE" <<EOF
+
+[${name}]
+url=${url}
+key=${key}
+last_model=${model}
+EOF
+  }
 fi
 
 # Alias for copilot.sh legacy
@@ -29,13 +48,18 @@ CONFIG_FILE="$DISPATCH_CONFIG_FILE"
 
 # --- Parse flags ---
 CONTINUE=0
-while getopts "c" opt; do
+NO_EDIT=0
+VERBOSE=0
+while getopts "cnv" opt; do
   case $opt in
   c) CONTINUE=1 ;;
+  n) NO_EDIT=1 ;;
+  v) VERBOSE=1 ;;
   *) ;;
   esac
 done
 shift $((OPTIND - 1))
+[[ "$VERBOSE" -eq 1 ]] && set -x
 
 # --- Continue mode: use last saved config ---
 if [[ "$CONTINUE" -eq 1 ]]; then
@@ -95,10 +119,10 @@ fi
 # --- 2. Fetch models ---
 echo "Fetching models..."
 if [[ -n "$API_KEY" ]]; then
-  MODELS=$(curl -s -H "Authorization: Bearer $API_KEY" "${BASE_URL}/models" |
+  MODELS=$(curl -s --connect-timeout 10 --max-time 30 -H "Authorization: Bearer $API_KEY" "${BASE_URL}/models" |
     jq -r '.data[].id // empty' 2>/dev/null)
 else
-  MODELS=$(curl -s "${BASE_URL}/models" |
+  MODELS=$(curl -s --connect-timeout 10 --max-time 30 "${BASE_URL}/models" |
     jq -r '.data[].id // empty' 2>/dev/null)
 fi
 
@@ -168,14 +192,25 @@ elif [[ "$ACTION" == "commit-ai" ]]; then
     temperature: 0.2
   }')
 
+  echo "🌐 Calling API: ${BASE_URL}/chat/completions"
   if [[ -n "$API_KEY" ]]; then
-    response=$(curl -fsS -H "Content-Type: application/json" -H "Authorization: Bearer ${API_KEY}" -d "$payload" "${BASE_URL}/chat/completions" 2>&1 || true)
+    response=$(curl -fsS --connect-timeout 10 --max-time 120 -w "\n%{http_code}" -H "Content-Type: application/json" -H "Authorization: Bearer ${API_KEY}" -d "$payload" "${BASE_URL}/chat/completions" 2>&1 || true)
   else
-    response=$(curl -fsS -H "Content-Type: application/json" -d "$payload" "${BASE_URL}/chat/completions" 2>&1 || true)
+    response=$(curl -fsS --connect-timeout 10 --max-time 120 -w "\n%{http_code}" -H "Content-Type: application/json" -d "$payload" "${BASE_URL}/chat/completions" 2>&1 || true)
   fi
 
+  http_code=$(echo "$response" | tail -1)
+  if [[ "$http_code" != "200" ]]; then
+    echo "❌ API returned HTTP $http_code"
+    echo "$response" | head -20
+    exit 1
+  fi
+
+  response=$(echo "$response" | sed '$d')
+
   if [[ -z "$response" ]] || ! printf '%s' "$response" | jq -e '.choices' >/dev/null 2>&1; then
-    echo "❌ API request failed"
+    echo "❌ API request failed: invalid JSON response"
+    echo "$response" | head -20
     exit 1
   fi
 
@@ -191,7 +226,7 @@ elif [[ "$ACTION" == "commit-ai" ]]; then
     else
       (fallback_message | gsub("`"; "") | gsub("Draft: "; ""))
     end
-  ')
+  ' 2>&1) || { echo "❌ jq parsing failed"; echo "$response" | head -20; exit 1; }
 
   message="$(printf '%s' "$message" | sed -e '/./,$!d')"
 
@@ -201,25 +236,52 @@ elif [[ "$ACTION" == "commit-ai" ]]; then
   fi
 
   # Add signoff for preview
-  name=$(git config user.name)
-  email=$(git config user.email)
+  name=$(git config user.name || true)
+  email=$(git config user.email || true)
   if [ -n "$name" ] && [ -n "$email" ]; then
     message="$message"$'\n\n'"Signed-off-by: $name <$email>"
   fi
 
-   # Open in editor for review/edit (empty = cancel)
-   tmpmsg=$(mktemp)
-   printf '%s\n' "$message" > "$tmpmsg"
-   trap 'rm -f "$tmpmsg"' EXIT
+  # No-edit mode: commit directly
+  if [[ "$NO_EDIT" -eq 1 ]]; then
+    git commit -m "$message"
+    echo "✅ Commit created!"
+    exit 0
+  fi
 
-   echo "📝 Opening editor (save+quit to commit, empty file to cancel)..."
-   "${EDITOR:-vi}" "$tmpmsg"
+  # Open in editor for review/edit (empty = cancel)
+  tmpmsg=$(mktemp)
+  printf '%s\n' "$message" > "$tmpmsg"
+  trap 'rm -f "$tmpmsg"' EXIT
 
-   edited=$(cat "$tmpmsg")
-   if [[ -z "$(printf '%s' "$edited" | tr -d '[:space:]')" ]]; then
-     echo "❌ Commit canceled (message empty)"
-   else
-     git commit -m "$edited"
-     echo "✅ Commit created!"
-   fi
+  echo "📝 Opening editor (save+quit to commit, empty file to cancel)..."
+
+  try_editor() {
+    local editors="${EDITOR:-nvim} vim vi nano"
+    for e in $editors; do
+      if command -v "$e" &>/dev/null; then
+        echo "✏️  Using editor: $e"
+        local ret=0
+        "$e" "$tmpmsg" || ret=$?
+        if [[ $ret -ne 0 ]]; then
+          echo "⚠️  Editor '$e' exited with code $ret"
+        fi
+        return $ret
+      fi
+    done
+    echo "No editor found. Use this message? [Y/n]"
+    read -r ans
+    [[ "$ans" =~ ^[Nn]$ ]] && echo "Canceled" && exit 1
+    git commit -m "$(cat "$tmpmsg")"
+  }
+
+  try_editor || true
+
+  edited=$(cat "$tmpmsg")
+  if [[ -z "$(printf '%s' "$edited" | tr -d '[:space:]')" ]]; then
+    echo "❌ Commit canceled (message empty)"
+  else
+    git commit -m "$edited"
+    echo "✅ Commit created!"
+  fi
 fi
