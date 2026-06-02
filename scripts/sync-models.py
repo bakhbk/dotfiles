@@ -173,6 +173,7 @@ def write_json(path: Path, data: dict) -> None:
     """Безопасно и атомарно записывает JSON в файл в кодировке UTF-8."""
     tmp_path = path.with_suffix('.tmp')
     try:
+        tmp_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         tmp_path.replace(path)
     except Exception as e:
