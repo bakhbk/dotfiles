@@ -26,14 +26,14 @@ setopt HIST_IGNORE_SPACE
 typeset -U path
 
 # Load scripts
-source ~/.dotfiles/.zsh_aliases
-source ~/.dotfiles/.zsh_tools
-source ~/.dotfiles/.zshenv
-source ~/.dotfiles/.create_tmux_session.sh
-source ~/.dotfiles/.commit.sh
-source ~/.dotfiles/.fvm_tools.sh
-source ~/.dotfiles/.ollama_fzf.sh
-source ~/.dotfiles/.clean.sh
+source ~/.dotfiles/zsh_aliases
+source ~/.dotfiles/zsh_tools
+source ~/.dotfiles/zshenv
+source ~/.dotfiles/create_tmux_session.sh
+source ~/.dotfiles/commit.sh
+source ~/.dotfiles/fvm_tools.sh
+source ~/.dotfiles/ollama_fzf.sh
+source ~/.dotfiles/clean.sh
 if [ -f ~/work/.zshrc ]; then
   source ~/work/.zshrc
 fi
@@ -66,11 +66,16 @@ if [[ $TERM == "dumb" ]]; then
     return
 fi
 
+export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+export PATH="$HOME/fvm/default/bin:$PATH"
+export PATH="$HOME/fvm/bin:$PATH"
+export PATH="$PATH":"$HOME/.pub-cache/bin"
+
 if [[ $USE_OH_MY_ZSH == "true" ]]; then
     # echo 'USE_OH_MY_ZSH user ' $USE_OH_MY_ZSH
 else 
     # echo 'USE_OH_MY_ZSH NOT used ' $USE_OH_MY_ZSH
-    source ~/.dotfiles/.shell_prompt
+    source ~/.dotfiles/shell/shell_prompt
 fi
 
 # fzf is a general-purpose command-line fuzzy finder.

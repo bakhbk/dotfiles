@@ -196,10 +196,10 @@ alias dsh='docker-shell'
 # Show adb commands
 alias adbi="cat ~/.zsh/adb-commands/AdbCommands"
 
-source ~/.dotfiles/.git_checkout_branch.sh
-source ~/.dotfiles/.git_delete_branch.sh
-source ~/.dotfiles/.tmux_session_selector.sh
-source ~/.dotfiles/.nvmv.sh
+source ~/.dotfiles/git_checkout_branch.sh
+source ~/.dotfiles/git_delete_branch.sh
+source ~/.dotfiles/tmux_session_selector.sh
+source ~/.dotfiles/nvmv.sh
 
 # Aider
 alias aider='aider --no-show-model-warnings --yes'

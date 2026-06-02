@@ -20,8 +20,8 @@ printhead "Устанавливаем Flutter версию $FVM_VERSION..."
 fvm install "$FVM_VERSION" >/dev/null 2>&1 || true
 fvm use "$FVM_VERSION" --force -s
 
-# Android SDK Setup
-source "$SCRIPT_DIR/android_setup.sh"
+# # Android SDK Setup
+# source "$SCRIPT_DIR/android_setup.sh"
 
 # Flutter Setup
 source "$SCRIPT_DIR/flutter_setup.sh"

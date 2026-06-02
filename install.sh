@@ -12,7 +12,7 @@ CONFIGS=(
   shell/zsh_aliases
   shell/zsh_tools
   shell/zshenv
-  shell/zshrc
+  shell/.zshrc
   installers/install-oh-my-zsh.sh
   shell/shell_prompt
   git/git_checkout_branch.sh
@@ -29,8 +29,8 @@ CONFIGS=(
 
 # Configs that should be copied to the home directory.
 CONFIGS_HOME_DIR=(
-  tmux/tmux.conf
-  shell/zshrc
+  tmux/.tmux.conf
+  shell/.zshrc
 )
 
 if [ $# -eq 0 ]; then
