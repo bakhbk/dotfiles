@@ -371,3 +371,20 @@ fi
 function gi() {
   curl -sLw '\n' https://www.toptal.com/developers/gitignore/api/$@
 }
+
+gitdo() {
+ find . -name .git -type d -prune | while read -r gitdir; do
+
+ repo_dir=$(dirname "$gitdir" | sed 's|^\./||')
+ if [ "$repo_dir" = "." ]; then
+ repo_dir="Корневая папка"
+ fi
+
+
+ echo -e "\n\033[1;34m📦 Репозиторий: \033[1;33m$repo_dir\033[0m"
+
+
+ (cd "$(dirname "$gitdir")" && eval "$@")
+ done
+ echo ""
+}
