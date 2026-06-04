@@ -148,6 +148,8 @@ alias gst='git stash'
 alias gstl='git stash list'
 alias gstp='git stash pop'
 alias gsts='git stash show -p'
+alias gdn='git --no-pager diff --color=always'
+alias gdcc='git --no-pager diff --cached --color=always'
 alias g_del_loc_b='git branch | grep -v "main" | xargs git branch -D'
 
 # Docker aliases (OrbStack)
