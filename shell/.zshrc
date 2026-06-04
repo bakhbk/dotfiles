@@ -116,3 +116,7 @@ if [[ "${OSTYPE}" = linux* ]]; then
         eval "$(brew shellenv)"
     fi
 fi
+
+if command -v zoxide &> /dev/null; then
+    eval "$(zoxide init zsh)"
+fi
