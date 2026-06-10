@@ -177,6 +177,7 @@ elif [[ "$ACTION" == "commit-ai" ]]; then
   fi
 
   # --- Generate diff (smart mode by default, full via -f) ---
+  set +o pipefail
   if [[ "$FULL_DIFF" -eq 1 ]]; then
     # Old behaviour: full staged diff (slow for large repos)
     DIFF="$(git diff --staged)"
@@ -193,11 +194,12 @@ elif [[ "$ACTION" == "commit-ai" ]]; then
         esac
         echo "$f"
       done | while IFS= read -r f; do
-        cnt=$(git diff --staged "$f" 2>/dev/null | grep '^[-+]' | grep -cv '^[+-]\{3\}' || echo 0)
+        cnt=$(git diff --staged "$f" 2>/dev/null | grep '^[-+]' | grep -cv '^[+-]\{3\}' 2>/dev/null || true)
+        cnt=$((cnt + 0))
         printf '%s:%s\n' "$cnt" "$f"
       done | sort -t: -k1nr | head -n 10 | cut -d: -f2- | while IFS= read -r f; do
         echo "--- $f ---"
-        git diff --staged -U3 "$f" 2>/dev/null | head -n 60
+        git diff --staged -U3 "$f" 2>/dev/null | head -n 60 || true
       done
     )"
   fi
