@@ -49,10 +49,12 @@ CONFIG_FILE="$DISPATCH_CONFIG_FILE"
 # --- Parse flags ---
 CONTINUE=0
 NO_EDIT=0
+FULL_DIFF=0
 VERBOSE=0
-while getopts "cnv" opt; do
+while getopts "cnvf" opt; do
   case $opt in
   c) CONTINUE=1 ;;
+  f) FULL_DIFF=1 ;;
   n) NO_EDIT=1 ;;
   v) VERBOSE=1 ;;
   *) ;;
@@ -174,15 +176,42 @@ elif [[ "$ACTION" == "commit-ai" ]]; then
     exit 1
   fi
 
-  diff="$(git diff --staged)"
-  if [[ -z "$diff" ]]; then
-    echo "❌ No staged changes to commit"
-    exit 1
+  # --- Generate diff (smart mode by default, full via -f) ---
+  if [[ "$FULL_DIFF" -eq 1 ]]; then
+    # Old behaviour: full staged diff (slow for large repos)
+    DIFF="$(git diff --staged)"
+  else
+    # Smart mode: pick top changed files, send compact diffs with ±3 lines context
+    DIFF="$(
+      git diff --name-only --staged 2>/dev/null | while IFS= read -r f; do
+        case "$f" in
+          *.lock|*.sum) continue ;;
+          README*|.gitignore|LICENSE*) continue ;;
+        esac
+        case "$f" in
+          *.png|*.jpg|*.gif|*.ico|*.pdf) continue ;;
+        esac
+        echo "$f"
+      done | while IFS= read -r f; do
+        cnt=$(git diff --staged "$f" 2>/dev/null | grep '^[-+]' | grep -cv '^[+-]\{3\}' || echo 0)
+        printf '%s:%s\n' "$cnt" "$f"
+      done | sort -t: -k1nr | head -n 10 | cut -d: -f2- | while IFS= read -r f; do
+        echo "--- $f ---"
+        git diff --staged -U3 "$f" 2>/dev/null | head -n 60
+      done
+    )"
   fi
 
-  echo "🤖 Generating commit message..."
+  if [[ "$FULL_DIFF" -eq 1 ]]; then
+    echo "🔍 Full diff mode ($(( $(wc -l <<< "$DIFF") )) lines)"
+  else
+    local_file_count=$(git diff --name-only --staged 2>/dev/null | wc -l)
+    echo "🔍 Smart mode: $(( $(echo "$DIFF" | grep '^---' | wc -l) )) source files ($local_file_count total changed, ~10 most modified selected)"
+  fi
 
-  payload=$(jq -n --arg diff "$diff" --arg model "$MODEL" '{
+
+  # --- Build JSON payload for LLM ---
+  payload=$(jq -n --arg diff "$DIFF" --arg model "$MODEL" '{
     model: $model,
     messages: [
       {role: "system", content: "Output ONLY a git commit message. First line MUST start with one of these exact words: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert. Then a colon and space, then the description. Example: feat(auth): add login page\n\nDo NOT output any other text before or after the commit message. No greetings, no explanations, no conversational phrases like I will, Let me, Here is."},
