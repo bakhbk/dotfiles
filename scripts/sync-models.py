@@ -41,7 +41,7 @@ ZED_MODEL_DEFAULTS = {
     "max_tokens": 200000,
     "max_completion_tokens": 200000,
     "supports_tool_calls": True,
-    "supports_images": False,
+    "supports_images": True
 }
 
 # Дефолтные значения для apiKey в pi models.json
@@ -57,10 +57,16 @@ MODEL_CAPABILITIES_YAML = Path.home() / ".config" / "dispatch" / "model-capabili
 
 # Дефолтные capabilities для моделей, которых нет в таблице
 CAPABILITIES_DEFAULTS = {
-    "vision": False,
+    "vision": True,
     "tools": True,  # большинство моделей поддерживают инструменты
-    "web": False,
+    "web": True,
 }
+
+
+def _is_reasoning_model(model_id: str) -> bool:
+    """Определяет, поддерживает ли модель extended thinking по имени."""
+    name = model_id.lower()
+    return "reasoning" in name or "thinking" in name
 
 
 def strip_trailing_commas(text: str) -> str:
@@ -151,7 +157,7 @@ def parse_capabilities_yaml(path: Path) -> dict:
 def zed_model_capabilities(caps: dict) -> dict:
     return {
         "tools": caps.get("tools", True),
-        "images": caps.get("vision", False),
+        "images": caps.get("vision", True),
         "parallel_tool_calls": caps.get("tools", True),
         "prompt_cache_key": caps.get("tools", True),
         "chat_completions": True,
@@ -165,7 +171,7 @@ def apply_capabilities(model: dict, caps: dict) -> None:
         return
 
     model["supports_tool_calls"] = caps.get("tools", True)
-    model["supports_images"] = caps.get("vision", False)
+    model["supports_images"] = caps.get("vision", True)
     model["capabilities"] = zed_model_capabilities(caps)
 
 
@@ -224,6 +230,12 @@ def sync_to_pi(provider_name: str, provider_cfg: dict, model_ids: list[str], cap
     if provider.get("apiKey") != expected_key:
         provider["apiKey"] = expected_key
 
+    # LM Studio / локальные серверы не поддерживают reasoning_effort и используют qwen-format
+    if provider_name in ("lmstudio",):
+        provider.setdefault("compat", {})
+        provider["compat"]["supportsReasoningEffort"] = True
+        provider["compat"]["thinkingFormat"] = "qwen-chat-template"
+
     active_ids = {m for m in model_ids if not m.startswith("text-embedding")}
 
     added = 0
@@ -239,15 +251,21 @@ def sync_to_pi(provider_name: str, provider_cfg: dict, model_ids: list[str], cap
         existing = next((m for m in provider.get("models", []) if m["id"] == model_id), None)
         if existing:
             needs_update = False
+            want_reasoning = _is_reasoning_model(model_id)
+            if existing.get("reasoning") != want_reasoning:
+                existing["reasoning"] = want_reasoning
+                needs_update = True
             if set(existing.get("input", [])) != set(input_types):
                 existing["input"] = input_types
                 needs_update = True
+
             if needs_update:
                 print(f"  pi ({provider_name}): ~{model_id}")
                 updated += 1
         else:
             provider["models"].append({
                 "id": model_id,
+                "reasoning": _is_reasoning_model(model_id),
                 "toolCalling": True,
                 "input": input_types,
             })
@@ -446,14 +464,6 @@ def sync_to_zed(provider_name: str, provider_cfg: dict, model_ids: list[str], ca
             if existing.get("supports_images") != caps["vision"]:
                 existing["supports_images"] = caps["vision"]
                 needs_update = True
-            new_capabilities = zed_model_capabilities(caps)
-            if existing.get("capabilities") != new_capabilities:
-                existing["capabilities"] = new_capabilities
-                needs_update = True
-            if existing.get("max_completion_tokens") != ZED_MODEL_DEFAULTS["max_completion_tokens"]:
-                existing["max_completion_tokens"] = ZED_MODEL_DEFAULTS["max_completion_tokens"]
-                needs_update = True
-            if "display_name" not in existing:
                 existing["display_name"] = model_id.split("/")[-1]
                 needs_update = True
             if needs_update:
