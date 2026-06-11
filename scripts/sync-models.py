@@ -206,25 +206,173 @@ def write_json(path: Path, data: dict) -> None:
         raise e
 
 
-def fetch_models(url: str, api_key: str = "") -> list[str]:
-    """Fetch модели с OpenAI-compatible endpoint. Возвращает список model IDs."""
+def _detect_provider_type(url: str) -> str:
+    """Определяет тип провайдера по URL.
+
+    Возвращает:
+      - 'lmstudio' — если URL указывает на LM Studio (содержит /api/v1/)
+      - 'openai_compatible' — для всех остальных (llama.cpp, Ollama и т.д.)
+    """
+    lower = url.lower()
+    if "/api/v1/" in lower:
+        return "lmstudio"
+    return "openai_compatible"
+
+
+def _models_url(provider_type: str, base_url: str) -> tuple[str, bool]:
+    """Возвращает URL endpoint для получения списка моделей.
+
+    Для LM Studio: базовый /v1/models + расширенный /api/v1/models.
+    Для остальных: только /v1/models.
+
+    Returns:
+        (openai_url, needs_extended) — стандартный URL и флаг, нужен ли расширенный API.
+    """
+    base_url = base_url.rstrip("/")
+
+    if provider_type == "lmstudio":
+        return f"{base_url}/v1/models", True
+    else:
+        return f"{base_url}/models", False
+
+
+def _normalize_lmstudio_key(key: str) -> str:
+    """Нормализует LM Studio key для сопоставления с /v1/models ID.
+
+    Удаляет квантование суффиксы (_Q6_K, @q4_0) и file extensions (.gguf).
+    Пример: 'google/gemma-4-12b-qat' → 'gemma-4-12b-qat'
+             'qwen/qwen3.6-35b-a3b' → 'qwen3.6-35b-a3b'
+    """
+    # Убираем publisher prefix (google/, qwen/, etc.)
+    normalized = key.split("/", 1)[-1] if "/" in key else key
+    return normalized.lower()
+
+
+def _normalize_v1_model_id(model_id: str) -> str:
+    """Нормализует /v1/models ID для сопоставления с LM Studio key.
+
+    Удаляет file extensions и quantization suffixes.
+    Пример: 'qwen3.6-35b-a3b_Q6_K' → 'qwen3.6-35b-a3b'
+             'Qwen3.6-27B-MTP' → 'qwen3.6-27b-mtp'
+             'qwopus3.6-27b-v2-mlx' → 'qwopus3.6-27b-v2-mlx'
+    """
+    normalized = model_id.lower()
+
+    # Убираем file extensions (case-insensitive match on the end)
+    import re
+    for ext in [".gguf", ".bin", ".mlx"]:
+        if normalized.endswith(ext):
+            normalized = normalized[: -len(ext)]
+
+    # Убираем quantization suffixes (_Q6_K, _8bit, etc.)
+    normalized = re.sub(r"_[A-Za-z0-9_]+$", "", normalized)
+
+    return normalized
+
+
+def _parse_lmstudio_details(response_data: dict) -> tuple[dict, dict]:
+    """Парсит расширенный LM Studio API response.
+
+    Returns:
+        (key_to_details, normalized_id_to_key) где:
+          key_to_details = {canonical_key: properties} — по полному ключу
+          normalized_id_to_key = {normalized_v1_id: canonical_key} — для сопоставления с /v1/models
+          Также строится reverse_map: {base_name_of_key: canonical_key} для fallback-маппинга
+          когда v1 ID не имеет publisher prefix (например qwen3.6-35b-a3b_Q6_K → qwen/qwen3.6-35b-a3b)
+    """
+    result: dict = {}
+    normalized_map: dict[str, str] = {}  # norm_v1_id -> canonical_key
+    reverse_map: dict[str, str] = {}  # base_name_of_canonical_key -> canonical_key
+    all_keys: list[str] = []  # все ключи из extended API
+
+    models_list = response_data.get("models", [])
+    for m in models_list:
+        key = m.get("key")
+        if not key:
+            continue
+
+        caps = m.get("capabilities", {})
+        quantization = m.get("quantization", {})
+
+        rd = {
+            "vision": caps.get("vision"),
+            "tools": caps.get("trained_for_tool_use",
+caps.get("tool_use")),
+            "architecture": m.get("architecture", ""),
+            "quantization": quantization.get("name") if isinstance(quantization, dict) else str(quantization),
+            "size_bytes": m.get("size_bytes"),
+            "max_context_length": m.get("max_context_length"),
+        }
+
+        result[key] = rd
+        all_keys.append(key)
+        # Строим прямой маппинг: нормализованный v1 ID → canonical key
+        norm_v1 = _normalize_v1_model_id(key)
+        normalized_map[norm_v1] = key
+        # Строим reverse-маппинг: basename canonical ключа → key (для fallback)
+        base_name = _normalize_v1_model_id(key.split("/", 1)[-1])
+        if base_name not in normalized_map or "/" not in key:
+            reverse_map[base_name] = key
+
+    return result, normalized_map, reverse_map
+
+
+def fetch_models(url: str, api_key: str = "") -> tuple[list[str], dict]:
+    """Fetch модели с провайдера. Возвращает (model_ids, raw_details).
+
+    model_ids: список ID моделей (базовый endpoint /v1/models)
+    raw_details: словарь {model_key: properties} из расширенного API (LM Studio only)
+
+    Для LM Studio зовёт и /v1/models, и /api/v1/models.
+    Для остальных (llama.cpp) — только /v1/models, raw_details = {}."""
     base_url = url.rstrip("/")
-    req = urllib.request.Request(f"{base_url}/models")
+    provider_type = _detect_provider_type(url)
+
+    # Базовый endpoint для всех провайдеров — получаем model IDs
+    openai_url, _ = _models_url(provider_type, base_url)
+
+    # Fetch model IDs from standard OpenAI-compatible endpoint
+    req = urllib.request.Request(openai_url)
     if api_key:
         req.add_header("Authorization", f"Bearer {api_key}")
     req.add_header("Accept-Charset", "utf-8")
 
+    model_ids = []
     try:
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
             raw_data = resp.read().decode('utf-8', errors='ignore')
             data = json.loads(raw_data)
-        return [m["id"] for m in data.get("data", [])]
+        model_ids = [m["id"] for m in data.get("data", [])]
     except Exception as e:
-        print(f"  warn: не удалось получить модели с {url}: {e}")
-        return []
+        print(f"  warn: не удалось получить модели с {openai_url}: {e}")
+
+    # Для LM Studio дополнительно зовём extended API для метаданных
+    raw_details: dict = {}
+    normalized_map: dict[str, str] = {}  # нормализованный ID → canonical key
+    reverse_map: dict[str, str] = {}  # fallback: basename из LM Studio key → canonical_key
+
+    # LM Studio extended API: заменяем /v1 на /api/v1
+    api_base = base_url.replace("/v1", "/api/v1").rstrip("/")
+    extended_url = f"{api_base}/models"
+    try:
+        ext_req = urllib.request.Request(extended_url)
+        if api_key:
+            ext_req.add_header("Authorization", f"Bearer {api_key}")
+        with urllib.request.urlopen(ext_req, timeout=REQUEST_TIMEOUT) as resp:
+            ext_raw = resp.read().decode('utf-8', errors='ignore')
+            ext_data = json.loads(ext_raw)
+        raw_details, normalized_map, reverse_map = _parse_lmstudio_details(ext_data)
+    except Exception as e:
+        print(f"  warn: не удалось получить расширенные данные с {extended_url}: {e}")
+    else:
+        if raw_details and normalized_map:
+            print(f"  [lmstudio] получено {len(raw_details)} моделей с расширенными свойствами")
+            print(f"  [lmstudio] маппинг {len(normalized_map)} ID из /v1→key")
+
+    return model_ids, raw_details, normalized_map, reverse_map
 
 
-def sync_to_pi(provider_name: str, provider_cfg: dict, model_ids: list[str], capabilities: dict) -> tuple[int, int, int]:
+def sync_to_pi(provider_name: str, provider_cfg: dict, model_ids: list[str], capabilities: dict = None, raw_details: dict = None, normalized_map: dict = None, reverse_map: dict = None) -> tuple[int, int, int]:
     """Синхронизирует модели в pi models.json."""
     if PI_MODELS.exists():
         models = read_jsonc(PI_MODELS)
@@ -253,6 +401,14 @@ def sync_to_pi(provider_name: str, provider_cfg: dict, model_ids: list[str], cap
         provider.setdefault("compat", {})
         provider["compat"]["supportsReasoningEffort"] = True
         provider["compat"]["thinkingFormat"] = "qwen-chat-template"
+    elif capabilities is None:
+        capabilities = {}
+    if raw_details is None:
+        raw_details = {}
+    if normalized_map is None:
+        normalized_map = {}
+    if reverse_map is None:
+        reverse_map = {}
 
     active_ids = {m for m in model_ids if not m.startswith("text-embedding")}
 
@@ -262,6 +418,30 @@ def sync_to_pi(provider_name: str, provider_cfg: dict, model_ids: list[str], cap
         if model_id.startswith("text-embedding"):
             continue
         caps = capabilities.get(model_id, CAPABILITIES_DEFAULTS)
+        # Override YAML capabilities с LM Studio extended API данных
+        provider_type = _detect_provider_type(provider_cfg["url"])
+        rd = None
+        if provider_type == "lmstudio":
+            # LM Studio: нормализуем ID и маппим на canonical key
+            norm_id = _normalize_v1_model_id(model_id)
+            canonical_key = normalized_map.get(norm_id)
+            if canonical_key and canonical_key in raw_details:
+                rd = raw_details[canonical_key]
+            # Fallback: reverse-map по basename (для моделей без publisher prefix в /v1/models)
+            if not rd and reverse_map:
+                base_name = norm_id  # уже нормализован, без publisher prefix
+                for key in reverse_map:
+                    if base_name.endswith(key) or (key and norm_id.split('/', 1)[-1] == key):
+                        rd = raw_details.get(reverse_map[key])
+                        break
+        else:
+            # llama.cpp: прямой lookup по model_id (meta.n_ctx и т.д.)
+            rd = raw_details.get(model_id)
+        if rd:
+            if rd.get('vision') is not None:
+                caps['vision'] = bool(rd['vision'])
+            if rd.get('tools') is not None:
+                caps['tools'] = bool(rd['tools'])
         input_types = ["text"]
         if caps.get("vision"):
             input_types.append("image")
@@ -301,14 +481,23 @@ def sync_to_pi(provider_name: str, provider_cfg: dict, model_ids: list[str], cap
     return added, updated, removed
 
 
-def sync_to_kilo(provider_name: str, provider_cfg: dict, model_ids: list[str], capabilities: dict) -> tuple[int, int, int]:
+def sync_to_kilo(provider_name: str, provider_cfg: dict, model_ids: list[str], capabilities: dict = None, raw_details: dict = None, normalized_map: dict = None, reverse_map: dict = None) -> tuple[int, int, int]:
     """Синхронизирует модели в kilo.jsonc."""
     if not KILO_CONFIG.exists():
         return 0, 0, 0
 
     config = read_jsonc(KILO_CONFIG)
     provider_key = KILO_PROVIDER_MAP.get(provider_name, provider_name)
+
+    if capabilities is None:
+        capabilities = {}
+    if raw_details is None:
+        raw_details = {}
     config.setdefault("provider", {})
+    if normalized_map is None:
+        normalized_map = {}
+    if reverse_map is None:
+        reverse_map = {}
 
     provider = config["provider"].setdefault(provider_key, {
         "name": provider_key.capitalize(),
@@ -333,6 +522,28 @@ def sync_to_kilo(provider_name: str, provider_cfg: dict, model_ids: list[str], c
         if model_id.startswith("text-embedding"):
             continue
         caps = capabilities.get(model_id, CAPABILITIES_DEFAULTS)
+        # Override YAML с LM Studio extended API данных
+        provider_type = _detect_provider_type(provider_cfg["url"])
+        rd = None
+        if provider_type == "lmstudio":
+            norm_id = _normalize_v1_model_id(model_id)
+            canonical_key = normalized_map.get(norm_id)
+            if canonical_key and canonical_key in raw_details:
+                rd = raw_details[canonical_key]
+            # Fallback: reverse-map по basename (для моделей без publisher prefix в /v1/models)
+            if not rd and reverse_map:
+                base_name = norm_id  # уже нормализован, без publisher prefix
+                for key in reverse_map:
+                    if base_name.endswith(key) or (key and norm_id.split('/', 1)[-1] == key):
+                        rd = raw_details.get(reverse_map[key])
+                        break
+        else:
+            rd = raw_details.get(model_id)
+        if rd:
+            if rd.get('vision') is not None:
+                caps['vision'] = bool(rd['vision'])
+            if rd.get('tools') is not None:
+                caps['tools'] = bool(rd['tools'])
 
         existing = provider["models"].get(model_id)
         if existing:
@@ -362,14 +573,23 @@ def sync_to_kilo(provider_name: str, provider_cfg: dict, model_ids: list[str], c
     return added, updated, removed
 
 
-def sync_to_opencode(provider_name: str, provider_cfg: dict, model_ids: list[str], capabilities: dict) -> tuple[int, int]:
+def sync_to_opencode(provider_name: str, provider_cfg: dict, model_ids: list[str], capabilities: dict = None, raw_details: dict = None, normalized_map: dict = None, reverse_map: dict = None) -> tuple[int, int]:
     """Синхронизирует модели в opencode.jsonc (если файл существует)."""
     if not OPENCODE_CONFIG.exists():
         return 0, 0
 
     config = read_jsonc(OPENCODE_CONFIG)
     provider_key = provider_name
+
+    if capabilities is None:
+        capabilities = {}
+    if raw_details is None:
+        raw_details = {}
     config.setdefault("provider", {})
+    if normalized_map is None:
+        normalized_map = {}
+    if reverse_map is None:
+        reverse_map = {}
 
     provider = config["provider"].setdefault(provider_key, {
         "name": provider_key.capitalize(),
@@ -402,6 +622,28 @@ def sync_to_opencode(provider_name: str, provider_cfg: dict, model_ids: list[str
         if model_id.startswith("text-embedding"):
             continue
         caps = capabilities.get(model_id, CAPABILITIES_DEFAULTS)
+        # Override YAML с LM Studio extended API данных
+        provider_type = _detect_provider_type(provider_cfg["url"])
+        rd = None
+        if provider_type == "lmstudio":
+            norm_id = _normalize_v1_model_id(model_id)
+            canonical_key = normalized_map.get(norm_id)
+            if canonical_key and canonical_key in raw_details:
+                rd = raw_details[canonical_key]
+            # Fallback: reverse-map по basename (для моделей без publisher prefix в /v1/models)
+            if not rd and reverse_map:
+                base_name = norm_id  # уже нормализован, без publisher prefix
+                for key in reverse_map:
+                    if base_name.endswith(key) or (key and norm_id.split('/', 1)[-1] == key):
+                        rd = raw_details.get(reverse_map[key])
+                        break
+        else:
+            rd = raw_details.get(model_id)
+        if rd:
+            if rd.get('vision') is not None:
+                caps['vision'] = bool(rd['vision'])
+            if rd.get('tools') is not None:
+                caps['tools'] = bool(rd['tools'])
         modalities = {
             "input": ["image", "text"] if caps.get("vision") else ["text"],
             "output": ["text"],
@@ -438,7 +680,7 @@ def sync_to_opencode(provider_name: str, provider_cfg: dict, model_ids: list[str
     return added, removed
 
 
-def sync_to_zed(provider_name: str, provider_cfg: dict, model_ids: list[str], capabilities: dict) -> tuple[int, int, int]:
+def sync_to_zed(provider_name: str, provider_cfg: dict, model_ids: list[str], capabilities: dict = None, raw_details: dict = None, normalized_map: dict = None, reverse_map: dict = None) -> tuple[int, int, int]:
     """Синхронизирует модели в Zed settings.json."""
     if not ZED_SETTINGS.exists():
         return 0, 0, 0
@@ -446,6 +688,15 @@ def sync_to_zed(provider_name: str, provider_cfg: dict, model_ids: list[str], ca
     config = read_jsonc(ZED_SETTINGS)
     language_models = config.setdefault("language_models", {})
 
+    if capabilities is None:
+        capabilities = {}
+    if raw_details is None:
+        raw_details = {}
+
+    if normalized_map is None:
+        normalized_map = {}
+    if reverse_map is None:
+        reverse_map = {}
     if provider_name in ZED_PROVIDER_MAP:
         target = language_models.setdefault(ZED_PROVIDER_MAP[provider_name], {})
     else:
@@ -472,6 +723,28 @@ def sync_to_zed(provider_name: str, provider_cfg: dict, model_ids: list[str], ca
         if model_id.startswith("text-embedding"):
             continue
         caps = capabilities.get(model_id, CAPABILITIES_DEFAULTS)
+        # Override YAML с LM Studio extended API данных
+        provider_type = _detect_provider_type(provider_cfg["url"])
+        rd = None
+        if provider_type == "lmstudio":
+            norm_id = _normalize_v1_model_id(model_id)
+            canonical_key = normalized_map.get(norm_id)
+            if canonical_key and canonical_key in raw_details:
+                rd = raw_details[canonical_key]
+            # Fallback: reverse-map по basename (для моделей без publisher prefix в /v1/models)
+            if not rd and reverse_map:
+                base_name = norm_id  # уже нормализован, без publisher prefix
+                for key in reverse_map:
+                    if base_name.endswith(key) or (key and norm_id.split('/', 1)[-1] == key):
+                        rd = raw_details.get(reverse_map[key])
+                        break
+        else:
+            rd = raw_details.get(model_id)
+        if rd:
+            if rd.get('vision') is not None:
+                caps['vision'] = bool(rd['vision'])
+            if rd.get('tools') is not None:
+                caps['tools'] = bool(rd['tools'])
 
         existing = next((m for m in sub_provider.get("available_models", []) if m.get("name") == model_id), None)
         if existing:
@@ -509,10 +782,19 @@ def sync_to_zed(provider_name: str, provider_cfg: dict, model_ids: list[str], ca
     return added, updated, removed
 
 
-def sync_to_code(provider_name: str, provider_cfg: dict, model_ids: list[str], capabilities: dict) -> tuple[int, int, int]:
+def sync_to_code(provider_name: str, provider_cfg: dict, model_ids: list[str], capabilities: dict = None, raw_details: dict = None, normalized_map: dict = None, reverse_map: dict = None) -> tuple[int, int, int]:
     """Синхронизирует модели в VS Code chatLanguageModels.json."""
     models_path = _find_chat_models_path()
 
+    if capabilities is None:
+        capabilities = {}
+    if raw_details is None:
+        raw_details = {}
+
+    if normalized_map is None:
+        normalized_map = {}
+    if reverse_map is None:
+        reverse_map = {}
     if models_path.exists():
         raw = models_path.read_text(encoding="utf-8")
         cleaned = strip_jsonc_comments(raw)
@@ -559,6 +841,28 @@ def sync_to_code(provider_name: str, provider_cfg: dict, model_ids: list[str], c
             continue
 
         caps = capabilities.get(model_id, CAPABILITIES_DEFAULTS)
+        # Override YAML с LM Studio extended API данных
+        provider_type = _detect_provider_type(provider_cfg["url"])
+        rd = None
+        if provider_type == "lmstudio":
+            norm_id = _normalize_v1_model_id(model_id)
+            canonical_key = normalized_map.get(norm_id)
+            if canonical_key and canonical_key in raw_details:
+                rd = raw_details[canonical_key]
+            # Fallback: reverse-map по basename (для моделей без publisher prefix в /v1/models)
+            if not rd and reverse_map:
+                base_name = norm_id  # уже нормализован, без publisher prefix
+                for key in reverse_map:
+                    if base_name.endswith(key) or (key and norm_id.split('/', 1)[-1] == key):
+                        rd = raw_details.get(reverse_map[key])
+                        break
+        else:
+            rd = raw_details.get(model_id)
+        if rd:
+            if rd.get('vision') is not None:
+                caps['vision'] = bool(rd['vision'])
+            if rd.get('tools') is not None:
+                caps['tools'] = bool(rd['tools'])
 
         existing = next((m for m in target.get("models", []) if m.get("id") == model_id), None)
         if existing:
@@ -679,17 +983,17 @@ def main() -> None:
             continue
 
         print(f"\nОбработка провайдера: {provider_name} ({provider_cfg['url']})")
-        model_ids = fetch_models(provider_cfg["url"], provider_cfg.get("key", ""))
+        model_ids, raw_details, normalized_map, reverse_map = fetch_models(provider_cfg["url"], provider_cfg.get("key", ""))
 
         if not model_ids:
             print(f"  Нет моделей для {provider_name}")
             continue
 
-        added_pi, updated_pi, removed_pi = sync_to_pi(provider_name, provider_cfg, model_ids, capabilities)
-        added_kilo, updated_kilo, removed_kilo = sync_to_kilo(provider_name, provider_cfg, model_ids, capabilities)
-        added_opencode, removed_opencode = sync_to_opencode(provider_name, provider_cfg, model_ids, capabilities)
-        added_zed, updated_zed, removed_zed = sync_to_zed(provider_name, provider_cfg, model_ids, capabilities)
-        added_code, updated_code, removed_code = sync_to_code(provider_name, provider_cfg, model_ids, capabilities)
+        added_pi, updated_pi, removed_pi = sync_to_pi(provider_name, provider_cfg, model_ids, capabilities, raw_details, normalized_map, reverse_map)
+        added_kilo, updated_kilo, removed_kilo = sync_to_kilo(provider_name, provider_cfg, model_ids, capabilities, raw_details, normalized_map, reverse_map)
+        added_opencode, removed_opencode = sync_to_opencode(provider_name, provider_cfg, model_ids, capabilities, raw_details, normalized_map, reverse_map)
+        added_zed, updated_zed, removed_zed = sync_to_zed(provider_name, provider_cfg, model_ids, capabilities, raw_details, normalized_map, reverse_map)
+        added_code, updated_code, removed_code = sync_to_code(provider_name, provider_cfg, model_ids, capabilities, raw_details, normalized_map, reverse_map)
 
         total_added += added_pi + added_kilo + added_opencode + added_zed + added_code
         total_updated += updated_pi + updated_kilo + updated_zed + updated_code
