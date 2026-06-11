@@ -447,6 +447,13 @@ def sync_to_pi(provider_name: str, provider_cfg: dict, model_ids: list[str], cap
             input_types.append("image")
 
         existing = next((m for m in provider.get("models", []) if m["id"] == model_id), None)
+
+        # Динамические токены из модели (max_context_length) — дефолты: 128k / 16k
+        if rd and rd.get('max_context_length'):
+            pi_ctx = rd['max_context_length']
+        else:
+            pi_ctx = 128000
+
         if existing:
             needs_update = False
             want_reasoning = _is_reasoning_model(model_id)
@@ -456,7 +463,13 @@ def sync_to_pi(provider_name: str, provider_cfg: dict, model_ids: list[str], cap
             if set(existing.get("input", [])) != set(input_types):
                 existing["input"] = input_types
                 needs_update = True
-
+            # Обновляем max токены динамически
+            if existing.get('contextWindow') != pi_ctx:
+                existing['contextWindow'] = pi_ctx
+                needs_update = True
+            if existing.get('maxTokens') != (pi_ctx // 2):
+                existing['maxTokens'] = pi_ctx // 2
+                needs_update = True
             if needs_update:
                 print(f"  pi ({provider_name}): ~{model_id}")
                 updated += 1
@@ -466,6 +479,8 @@ def sync_to_pi(provider_name: str, provider_cfg: dict, model_ids: list[str], cap
                 "reasoning": _is_reasoning_model(model_id),
                 "toolCalling": True,
                 "input": input_types,
+                "contextWindow": pi_ctx,
+                "maxTokens": pi_ctx // 2,
             })
             print(f"  pi ({provider_name}): +{model_id}")
             added += 1
@@ -644,6 +659,11 @@ def sync_to_opencode(provider_name: str, provider_cfg: dict, model_ids: list[str
                 caps['vision'] = bool(rd['vision'])
             if rd.get('tools') is not None:
                 caps['tools'] = bool(rd['tools'])
+        # Вычисляем max контекст-токены из raw_details для limit
+        if rd and rd.get('max_context_length'):
+            oc_ctx = rd['max_context_length']
+        else:
+            oc_ctx = 128000
         modalities = {
             "input": ["image", "text"] if caps.get("vision") else ["text"],
             "output": ["text"],
@@ -658,6 +678,11 @@ def sync_to_opencode(provider_name: str, provider_cfg: dict, model_ids: list[str
             if existing.get("modalities") != modalities:
                 existing["modalities"] = modalities
                 needs_update = True
+            # Динамические limit токены (context + output, без input — schema opencode не принимает null)
+            existing_limit = existing.get("limit", {})
+            if (existing_limit.get("context") != oc_ctx) or (existing_limit.get("output") != oc_ctx // 2):
+                existing["limit"] = {"context": oc_ctx, "output": oc_ctx // 2}
+                needs_update = True
             if needs_update:
                 print(f"  opencode ({provider_key}): ~{model_id}")
                 updated += 1
@@ -665,6 +690,7 @@ def sync_to_opencode(provider_name: str, provider_cfg: dict, model_ids: list[str
             provider["models"][model_id] = {
                 "name": model_id,
                 "modalities": modalities,
+                "limit": {"context": oc_ctx, "output": oc_ctx // 2},
             }
             print(f"  opencode ({provider_key}): +{model_id}")
             added += 1
@@ -747,6 +773,13 @@ def sync_to_zed(provider_name: str, provider_cfg: dict, model_ids: list[str], ca
                 caps['tools'] = bool(rd['tools'])
 
         existing = next((m for m in sub_provider.get("available_models", []) if m.get("name") == model_id), None)
+
+        # Динамические max токены из модели (max_context_length) — дефолт 200000
+        if rd and rd.get('max_context_length'):
+            zed_max_tokens = rd['max_context_length']
+        else:
+            zed_max_tokens = 200000
+
         if existing:
             needs_update = False
             if existing.get("supports_tool_calls") != caps["tools"]:
@@ -755,7 +788,14 @@ def sync_to_zed(provider_name: str, provider_cfg: dict, model_ids: list[str], ca
             if existing.get("supports_images") != caps["vision"]:
                 existing["supports_images"] = caps["vision"]
                 needs_update = True
+            if existing.get("display_name") != model_id.split("/")[-1]:
                 existing["display_name"] = model_id.split("/")[-1]
+                needs_update = True
+            if existing.get('max_tokens') != zed_max_tokens:
+                existing['max_tokens'] = zed_max_tokens
+                needs_update = True
+            if existing.get('max_completion_tokens') != zed_max_tokens:
+                existing['max_completion_tokens'] = zed_max_tokens
                 needs_update = True
             if needs_update:
                 print(f"  zed ({provider_name}): ~{model_id}")
@@ -766,6 +806,8 @@ def sync_to_zed(provider_name: str, provider_cfg: dict, model_ids: list[str], ca
                 "name": model_id,
                 "display_name": model_id.split("/")[-1],
             }
+            model_data["max_tokens"] = zed_max_tokens
+            model_data["max_completion_tokens"] = zed_max_tokens
             apply_capabilities(model_data, caps)
             sub_provider.setdefault("available_models", []).append(model_data)
             print(f"  zed ({provider_name}): +{model_id}")
