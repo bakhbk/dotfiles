@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 # Запуск: uv run ~/dotfiles/scripts/sync-models.py
-"""Синхронизирует модели из провайдеров в pi models.json, kilo.jsonc, opencode.jsonc и Zed settings.json.
+"""Синхронизирует модели из провайдеров в pi models.json, kilo.jsonc, opencode.jsonc, Zed settings.json и VS Code chatLanguageModels.
 
 Читает провайдеры из ~/.config/dispatch/providers.conf (тот же источник правды, что и copilot.sh),
 использует ~/.config/dispatch/model-capabilities.yaml для сведений о возможностях моделей,
 fetchит модели через OpenAI-compatible endpoint для каждого провайдера,
-и синхронизирует в pi models.json, kilo.jsonc, opencode.jsonc и Zed settings.json.
+и синхронизирует в pi models.json, kilo.jsonc, opencode.jsonc, Zed settings.json и VS Code chatLanguageModels.
 """
 
 import configparser
+import hashlib
 import json
 import re
 import sys
@@ -22,6 +23,23 @@ PI_MODELS = Path.home() / ".pi" / "agent" / "models.json"
 KILO_CONFIG = Path.home() / ".config" / "kilo" / "kilo.jsonc"
 OPENCODE_CONFIG = Path.home() / ".config" / "opencode" / "opencode.jsonc"
 ZED_SETTINGS = Path.home() / ".config" / "zed" / "settings.json"
+
+# VS Code chatLanguageModels (несколько возможных путей)
+CODE_USER_FOLDER = Path.home() / "Library" / "Application Support" / "Code" / "User"
+CODE_USER_LINUX_FOLDER = Path.home() / ".config" / "Code" / "User"
+CODE_CHAT_MODELS = CODE_USER_FOLDER / "chatLanguageModels.json"
+
+
+def _find_chat_models_path() -> Path:
+    """Находит путь к chatLanguageModels.json, проверяя macOS и Linux пути."""
+    if CODE_CHAT_MODELS.exists():
+        return CODE_CHAT_MODELS
+    linux_path = CODE_USER_LINUX_FOLDER / "chatLanguageModels.json"
+    if linux_path.exists():
+        return linux_path
+    # Создаём macOS-путь по умолчанию (создаст директорию при записи)
+    CODE_USER_FOLDER.mkdir(parents=True, exist_ok=True)
+    return CODE_CHAT_MODELS
 
 # Маппинг имён провайдеров из providers.conf → kilo
 KILO_PROVIDER_MAP = {
@@ -491,6 +509,102 @@ def sync_to_zed(provider_name: str, provider_cfg: dict, model_ids: list[str], ca
     return added, updated, removed
 
 
+def sync_to_code(provider_name: str, provider_cfg: dict, model_ids: list[str], capabilities: dict) -> tuple[int, int, int]:
+    """Синхронизирует модели в VS Code chatLanguageModels.json."""
+    models_path = _find_chat_models_path()
+
+    if models_path.exists():
+        raw = models_path.read_text(encoding="utf-8")
+        cleaned = strip_jsonc_comments(raw)
+
+        if not cleaned.strip():
+            data: list = []
+        else:
+            data = json.loads(cleaned)
+    else:
+        models_path.parent.mkdir(parents=True, exist_ok=True)
+        data = []
+
+    # Находим нужный провайдер в массиве
+    target = None
+    for p in data:
+        if isinstance(p, dict) and (p.get("name") == provider_name or p.get("vendor") == "customendpoint"):
+            target = p
+            break
+
+    # Если не нашли, создаём новый
+    if not target:
+        target = {
+            "name": provider_name,
+            "vendor": "customendpoint",
+            "apiType": "messages",
+            "models": [],
+        }
+        api_key = provider_cfg.get("key")
+        if not api_key:
+            # Генерируем placeholder для input secret
+            target["apiKey"] = f"$input:chat.lm.secret.-{hashlib.md5(provider_name.encode()).hexdigest()[:8]}"
+        else:
+            target["apiKey"] = f"$input:chat.lm.secret.-{hashlib.md5(api_key.encode()).hexdigest()[:8]}"
+        data.append(target)
+
+    # Обновляем URL если нужно (через models[].url)
+    active_ids = {m for m in model_ids if not m.startswith("text-embedding")}
+
+    added = 0
+    updated = 0
+
+    for model_id in model_ids:
+        if model_id.startswith("text-embedding"):
+            continue
+
+        caps = capabilities.get(model_id, CAPABILITIES_DEFAULTS)
+
+        existing = next((m for m in target.get("models", []) if m.get("id") == model_id), None)
+        if existing:
+            needs_update = False
+            # Обновляем toolCalling и vision из capabilities
+            if existing.get("toolCalling") != caps.get("tools", True):
+                existing["toolCalling"] = caps.get("tools", True)
+                needs_update = True
+            if existing.get("vision") != caps.get("vision", True):
+                existing["vision"] = caps.get("vision", True)
+                needs_update = True
+
+            if needs_update:
+                print(f"  code ({provider_name}): ~{model_id}")
+                updated += 1
+        else:
+            model_entry = {
+                "id": model_id,
+                "name": model_id,  # как в конфиге на скриншоте: "qwen/qwen3.6-35b-a3b"
+                "url": provider_cfg["url"],  # базовый URL провайдера не хранится на уровне модели
+                "toolCalling": caps.get("tools", True),
+                "vision": caps.get("vision", True),
+            }
+
+            # Добавляем разумные дефолты для max токенов
+            model_entry["maxInputTokens"] = 128000
+            model_entry["maxOutputTokens"] = 16000
+
+            target.setdefault("models", []).append(model_entry)
+            print(f"  code ({provider_name}): +{model_id}")
+            added += 1
+
+    # Удаляем устаревшие модели
+    removed = 0
+    for model in list(target.get("models", [])):
+        if model.get("id") not in active_ids:
+            target["models"].remove(model)
+            print(f"  code ({provider_name}): -{model.get('id')}")
+            removed += 1
+
+    # Записываем обратно
+    write_json(models_path, data)
+
+    return added, updated, removed
+
+
 def normalize_provider_url(url: str) -> str:
     url = url.strip().rstrip("/")
     if not url or url.lower() in {"undefined", "null", "none"}:
@@ -575,10 +689,11 @@ def main() -> None:
         added_kilo, updated_kilo, removed_kilo = sync_to_kilo(provider_name, provider_cfg, model_ids, capabilities)
         added_opencode, removed_opencode = sync_to_opencode(provider_name, provider_cfg, model_ids, capabilities)
         added_zed, updated_zed, removed_zed = sync_to_zed(provider_name, provider_cfg, model_ids, capabilities)
+        added_code, updated_code, removed_code = sync_to_code(provider_name, provider_cfg, model_ids, capabilities)
 
-        total_added += added_pi + added_kilo + added_opencode + added_zed
-        total_updated += updated_pi + updated_kilo + updated_zed
-        total_removed += removed_pi + removed_kilo + removed_opencode + removed_zed
+        total_added += added_pi + added_kilo + added_opencode + added_zed + added_code
+        total_updated += updated_pi + updated_kilo + updated_zed + updated_code
+        total_removed += removed_pi + removed_kilo + removed_opencode + removed_zed + removed_code
 
     print(f"\nИтого: добавлено {total_added}, обновлено {total_updated}, удалено {total_removed} моделей")
 
