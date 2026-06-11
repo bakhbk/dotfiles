@@ -973,6 +973,76 @@ def normalize_provider_url(url: str) -> str:
     return url
 
 
+def sync_code_profiles() -> int:
+    """Копирует chatLanguageModels.json из активного/основного профиля во все остальные профили VS Code.
+
+    Возвращает число скопированных профилей (0 = ничего не нужно копировать).
+    """
+    profiles_dir = CODE_USER_FOLDER / "profiles"
+    if not profiles_dir.exists():
+        return 0
+
+    # Собираем список UUID-папок профилей
+    profile_uuids = [
+        p.name for p in profiles_dir.iterdir()
+        if p.is_dir() and re.match(r"^[0-9a-f\-]{8,}$", p.name)
+    ]
+
+    if not profile_uuids:
+        return 0
+
+    # Источником берём ОБЩИЙ (не-профильный) chatLanguageModels.json.
+    # Именно его обновляет sync_to_code() при синхронизации провайдеров.
+    primary_chat_models = CODE_USER_FOLDER / "chatLanguageModels.json"
+
+    source_data: list | None = None
+    source_path: Path | str = ""
+
+    if primary_chat_models.exists():
+        source_path = primary_chat_models
+        raw = primary_chat_models.read_text(encoding="utf-8")
+        cleaned = strip_jsonc_comments(raw)
+        if cleaned.strip():
+            source_data = json.loads(cleaned)
+
+    # Фоллбэк: основной файл (не в папке профиля)
+    if source_data is None and primary_chat_models.exists():
+        source_path = primary_chat_models
+        raw = primary_chat_models.read_text(encoding="utf-8")
+        cleaned = strip_jsonc_comments(raw)
+        if cleaned.strip():
+            source_data = json.loads(cleaned)
+
+    # Если источника нет — ничего делать не будем
+    if source_data is None:
+        return 0
+
+    printed = f"sync_code_profiles: копируем из {source_path}"
+    copied = 0
+
+    for uuid in profile_uuids:
+        dest_path = profiles_dir / uuid / "chatLanguageModels.json"
+
+
+
+        try:
+            tmp = dest_path.with_suffix('.tmp')
+            tmp.parent.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(json.dumps(source_data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            tmp.replace(dest_path)
+            print(f"{printed} -> {dest_path}")
+            copied += 1
+        except Exception as e:
+            print(f"sync_code_profiles: ошибка при записи {dest_path}: {e}")
+            if dest_path.exists():
+                try:
+                    dest_path.unlink()
+                except Exception:
+                    pass
+
+    return copied
+
+
 def normalize_api_key(key: str) -> str:
     key = key.strip()
     return "" if key.lower() in {"undefined", "null", "none"} else key
@@ -1052,6 +1122,10 @@ def main() -> None:
         total_removed += removed_pi + removed_kilo + removed_opencode + removed_zed + removed_code
 
     print(f"\nИтого: добавлено {total_added}, обновлено {total_updated}, удалено {total_removed} моделей")
+
+    # Копируем полный chatLanguageModels.json во все профили VS Code (KISS)
+    copied = sync_code_profiles()
+    print(f"Профили VS Code: скопировано {copied}")
 
 
 if __name__ == "__main__":
