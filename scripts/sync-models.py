@@ -865,6 +865,13 @@ def sync_to_code(provider_name: str, provider_cfg: dict, model_ids: list[str], c
                 caps['tools'] = bool(rd['tools'])
 
         existing = next((m for m in target.get("models", []) if m.get("id") == model_id), None)
+
+        # Вычисляем динамические max токены из модельных данных (max_context_length)
+        if rd and rd.get('max_context_length'):
+            mcl = rd['max_context_length']
+        else:
+            mcl = 128000
+
         if existing:
             needs_update = False
             # Обновляем toolCalling и vision из capabilities
@@ -874,7 +881,13 @@ def sync_to_code(provider_name: str, provider_cfg: dict, model_ids: list[str], c
             if existing.get("vision") != caps.get("vision", True):
                 existing["vision"] = caps.get("vision", True)
                 needs_update = True
-
+            # Обновляем max токены динамически
+            if existing.get('maxInputTokens') != mcl:
+                existing['maxInputTokens'] = mcl
+                needs_update = True
+            if existing.get('maxOutputTokens') != (mcl // 2):
+                existing['maxOutputTokens'] = mcl // 2
+                needs_update = True
             if needs_update:
                 print(f"  code ({provider_name}): ~{model_id}")
                 updated += 1
@@ -886,11 +899,8 @@ def sync_to_code(provider_name: str, provider_cfg: dict, model_ids: list[str], c
                 "toolCalling": caps.get("tools", True),
                 "vision": caps.get("vision", True),
             }
-
-            # Добавляем разумные дефолты для max токенов
-            model_entry["maxInputTokens"] = 128000
-            model_entry["maxOutputTokens"] = 16000
-
+            model_entry["maxInputTokens"] = mcl
+            model_entry["maxOutputTokens"] = mcl // 2
             target.setdefault("models", []).append(model_entry)
             print(f"  code ({provider_name}): +{model_id}")
             added += 1
