@@ -807,10 +807,10 @@ def sync_to_code(provider_name: str, provider_cfg: dict, model_ids: list[str], c
         models_path.parent.mkdir(parents=True, exist_ok=True)
         data = []
 
-    # Находим нужный провайдер в массиве
+    # Находим нужный провайдер в массиве — только по name, vendor может совпадать у всех
     target = None
     for p in data:
-        if isinstance(p, dict) and (p.get("name") == provider_name or p.get("vendor") == "customendpoint"):
+        if isinstance(p, dict) and (p.get("name") == provider_name):
             target = p
             break
 
