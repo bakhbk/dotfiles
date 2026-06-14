@@ -381,7 +381,10 @@ def sync_to_pi(provider_name: str, provider_cfg: dict, model_ids: list[str], cap
 
     providers = models.setdefault("providers", {})
 
-    expected_key = provider_cfg.get("key") or PI_API_KEY_DEFAULTS.get(provider_name, "")
+    expected_key = provider_cfg.get("key") or PI_API_KEY_DEFAULTS.get(provider_name)
+    if expected_key is None:
+        expected_key = "none"
+
     provider = providers.setdefault(provider_name, {
         "baseUrl": provider_cfg["url"],
         "api": "openai-completions",
