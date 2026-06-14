@@ -492,6 +492,7 @@ def sync_to_pi(provider_name: str, provider_cfg: dict, model_ids: list[str], cap
             print(f"  pi ({provider_name}): -{model['id']}")
             removed += 1
 
+    PI_MODELS.parent.mkdir(parents=True, exist_ok=True)
     write_json(PI_MODELS, models)
     return added, updated, removed
 
