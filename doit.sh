@@ -234,9 +234,11 @@ else
   fi
 fi
 
-# --- 2. Fetch available models from API ---
-echo "Fetching models..."
+# --- 2. Fetch available models from API (skip if --model already set) ---
 MODELS=""
+if [[ -z "$MODEL_OVERRIDE" ]]; then
+  echo "Fetching models..."
+fi
 if [[ -n "$API_KEY" ]]; then
   MODELS=$(curl -s --connect-timeout 3 --max-time 5 \
     -H "Authorization: Bearer $API_KEY" "${BASE_URL}/models" 2>/dev/null | \
@@ -248,16 +250,21 @@ else
 fi
 
 if [[ -z "$MODELS" ]]; then
-  echo "⚠️  API not responding. Using last known model from config." >&2
-  LAST_MODEL=$(get_provider_last_model "$NAME")
-  if [[ -n "$LAST_MODEL" ]]; then
-    MODELS="$LAST_MODEL"
-    echo "   Using: $LAST_MODEL"
+  if [[ -n "$MODEL_OVERRIDE" ]]; then
+    # Model was explicitly provided, use it directly
+    MODELS="$MODEL_OVERRIDE"
   else
-    # Fallback: ask user to type a model name
-    read -rp "Enter model name (or press Enter to cancel): " MODEL
-    [[ -z "$MODEL" ]] && echo "Aborted." >&2 && exit 1
-    MODELS="$MODEL"
+    echo "⚠️  API not responding. Using last known model from config." >&2
+    LAST_MODEL=$(get_provider_last_model "$NAME")
+    if [[ -n "$LAST_MODEL" ]]; then
+      MODELS="$LAST_MODEL"
+      echo "   Using: $LAST_MODEL"
+    else
+      # Fallback: ask user to type a model name
+      read -rp "Enter model name (or press Enter to cancel): " MODEL
+      [[ -z "$MODEL" ]] && echo "Aborted." >&2 && exit 1
+      MODELS="$MODEL"
+    fi
   fi
 fi
 
