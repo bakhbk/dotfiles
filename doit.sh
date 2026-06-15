@@ -334,7 +334,8 @@ if [[ "$ACTION" == "commit-ai" ]]; then
   DIFF=""
   if [[ "$FULL_DIFF" -eq 1 ]]; then
     DIFF="$(git diff --staged)"
-    echo "🔍 Full diff mode ($(( $(wc -l <<< "$DIFF") )) lines)"
+    diff_lines=$(wc -l <<< "$DIFF")
+    echo "🔍 Full diff mode ($diff_lines lines)"
   else
     # Smart mode: top 10 most modified source files with ±3 lines context
     tmpfiles=$(mktemp)
@@ -361,7 +362,9 @@ if [[ "$ACTION" == "commit-ai" ]]; then
     done < "$tmpfiles"
     
     local_file_count=$(git diff --name-only --staged 2>/dev/null | wc -l)
-    echo "🔍 Smart mode: $(( $(echo "$DIFF" | grep -c '^---' || echo 0) )) source files ($local_file_count total changed, ~10 most modified selected)"
+    src_files=$(echo "$DIFF" | grep -c '^---' 2>/dev/null || echo 0)
+    src_files=${src_files:-0}
+    echo "🔍 Smart mode: $src_files source files ($local_file_count total changed, ~10 most modified selected)"
   fi
 
   # --- Build JSON payload for LLM ---
