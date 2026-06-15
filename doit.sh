@@ -100,8 +100,9 @@ VERBOSE=0           # -v: enable bash debug mode
 DRY_RUN=0           # --dry-run: show generated message, don't commit
 
 PROVIDER=""         # --provider: explicit provider name
-ACTION=""           # --action: explicit action (copilot|commit-ai)
+ACTION=""           # --action: explicit action (copilot|commit-ai|by-pi|by-opencode)
 MODEL_OVERRIDE=""   # --model: override model selection
+PROMPT_ARGS=()      # positional args after all flags (the actual prompt/task)
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -114,7 +115,7 @@ while [[ $# -gt 0 ]]; do
     --provider)        PROVIDER="$2"; shift 2 ;;
     --action)          ACTION="$2"; shift 2 ;;
     --model)           MODEL_OVERRIDE="$2"; shift 2 ;;
-    *) echo "Unknown option: $1" >&2; exit 1 ;;
+    *) PROMPT_ARGS+=("$1"); shift ;;
   esac
 done
 
@@ -289,11 +290,45 @@ fi
 save_provider "$NAME" "$BASE_URL" "$API_KEY" "$MODEL"
 echo "Saved: provider=$NAME model=$MODEL"
 
-# --- 5. Choose action: copilot or commit-ai ---
+# --- 5. Choose action: copilot, commit-ai, by-pi, or by-opencode ---
 if [[ -z "$ACTION" ]]; then
   echo ""
-  ACTION=$(printf 'copilot\ncommit-ai' | fzf --preview 'echo {}')
+  ACTION=$(printf 'copilot\ncommit-ai\nby-pi\nby-opencode' | fzf --preview 'echo {}')
   [[ -z "$ACTION" ]] && echo "Aborted." >&2 && exit 1
+fi
+
+# ============================================================================
+# Action: by-pi — delegate to Pi CLI (fast, lightweight)
+# Usage:
+#   doit.sh --provider lmstudio --model qwen3.6-27b --action by-pi "напиши тест"
+#   doit.sh -c --action by_pi "continue work"           # uses last provider/model
+#   doit.sh -c --action by-opencode "use opencode"      # uses last provider/model
+# ============================================================================
+if [[ "$ACTION" == "by-pi" ]]; then
+  if [[ ${#PROMPT_ARGS[@]} -eq 0 ]]; then
+    echo "❌ No prompt provided. Usage: doit.sh --action by-pi \"task description\""
+    exit 1
+  fi
+  show_hint "by-pi" "$NAME" "$MODEL"
+  echo "→ Delegating to Pi (fast, lightweight)..."
+  exec pi -ne -ns --model "$MODEL" "${PROMPT_ARGS[*]}" 2>&1
+fi
+
+# ============================================================================
+# Action: by-opencode — delegate to OpenCode CLI (heavier, more MCP power)
+# Usage:
+#   doit.sh --provider lmstudio --model qwen3.6-27b --action by-opencode "напиши тест"
+#   doit.sh -c --action by_opencode "continue work"     # uses last provider/model
+# Note: requires interactive terminal (TTY) — opencode run is TUI-only
+# ============================================================================
+if [[ "$ACTION" == "by-opencode" ]]; then
+  if [[ ${#PROMPT_ARGS[@]} -eq 0 ]]; then
+    echo "❌ No prompt provided. Usage: doit.sh --action by-opencode \"task description\""
+    exit 1
+  fi
+  show_hint "by-opencode" "$NAME" "$MODEL"
+  echo "→ Delegating to OpenCode..."
+  exec opencode run -m "$MODEL" --pure --dangerously-skip-permissions "${PROMPT_ARGS[*]}"
 fi
 
 # ============================================================================
