@@ -53,15 +53,15 @@ if ! type get_provider_names &>/dev/null; then
   }
 
   get_provider_url() {
-    awk -v s="[${1}]" '$0==s{f=1;next}/^\[/{f=0}f&&/^url *={sub(/^url *=*/,"");gsub(/^[ \t]+|[ \t]+$/,"",$0);print}' "$DISPATCH_CONFIG_FILE"
+    awk -v s="[${1}]" '$0==s{f=1;next}/^\[/{f=0}f&&/^url *=/{sub(/^url *=*/,"");gsub(/^[ \t]+|[ \t]+$/,"",$0);print}' "$DISPATCH_CONFIG_FILE"
   }
 
   get_provider_key() {
-    awk -v s="[${1}]" '$0==s{f=1;next}/^\[/{f=0}f&&/^key *={sub(/^key *=*/,"");gsub(/^[ \t]+|[ \t]+$/,"",$0);print}' "$DISPATCH_CONFIG_FILE"
+    awk -v s="[${1}]" '$0==s{f=1;next}/^\[/{f=0}f&&/^key *=/{sub(/^key *=*/,"");gsub(/^[ \t]+|[ \t]+$/,"",$0);print}' "$DISPATCH_CONFIG_FILE"
   }
 
   get_provider_last_model() {
-    awk -v s="[${1}]" '$0==s{f=1;next}/^\[/{f=0}f&&/^last_model *={sub(/^last_model *=*/,"");gsub(/^[ \t]+|[ \t]+$/,"",$0);print}' "$DISPATCH_CONFIG_FILE"
+    awk -v s="[${1}]" '$0==s{f=1;next}/^\[/{f=0}f&&/^last_model *=/{sub(/^last_model *=*/,"");gsub(/^[ \t]+|[ \t]+$/,"",$0);print}' "$DISPATCH_CONFIG_FILE"
   }
 
   save_provider() {
