@@ -347,8 +347,10 @@ if [[ "$ACTION" == "commit-ai" ]]; then
         *.lock|*.sum|README*|.gitignore|LICENSE*) continue ;;
         *.png|*.jpg|*.gif|*.ico|*.pdf) continue ;;
       esac
-      cnt=$(git diff --staged "$fname" 2>/dev/null | grep '^[-+]' | grep -cv '^[+-]\{3\}' 2>/dev/null || echo 0)
-      cnt=$((cnt + 0))
+      cnt=$(git diff --staged "$fname" 2>/dev/null | grep '^[-+]' | grep -cv '^[+-]\{3\}' 2>/dev/null || true)
+      cnt=${cnt:-0}
+      cnt=$(echo "$cnt" | tr -d '[:space:]')
+      [[ -z "$cnt" ]] && cnt=0
       printf '%s:%s\n' "$cnt" "$fname"
     done | sort -t: -k1nr | head -n 10 > "$tmpfiles"
     
@@ -488,7 +490,7 @@ if [[ "$ACTION" == "commit-ai" ]]; then
     echo "❌ Commit canceled (message empty)" >&2
   else
     show_hint "commit-ai" "$NAME" "$MODEL" "--no-edit"
-    git commit -m "$edited"
+    git commit -m "$(cat "$tmpmsg")"
     echo "✅ Commit created!"
   fi
 fi
