@@ -4,6 +4,7 @@ else
   ZSH_THEME="bureau"      # Другая ОС (Linux, Windows WSL и т. д.)
 fi
 plugins=(
+  web-search
   git-flow
   brew
   aliases
