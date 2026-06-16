@@ -21,7 +21,7 @@ alias -g U='|uniq'
 alias -g GI='|grep -i'
 alias -g V='|grep -v'
 alias -g X='|xargs'
-alias -g P='|python -m json.tool'
+#alias -g P='|python -m json.tool'
 alias -g TIME='|ts'
 alias -g F='|fzf --preview="cat {}"'
 # macOS specific
