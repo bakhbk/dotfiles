@@ -499,7 +499,6 @@ if [[ "$ACTION" == "commit-ai" ]]; then
 
   # --- Mode: dry-run — show message, exit without committing ---
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    show_hint "commit-ai" "$NAME" "$MODEL" "--no-edit"
     echo ""
     echo "📝 Generated commit message:"
     echo "$message" | sed 's/^/   /'
@@ -509,7 +508,6 @@ if [[ "$ACTION" == "commit-ai" ]]; then
 
   # --- Mode: no-edit — commit directly without editor ---
   if [[ "$NO_EDIT" -eq 1 ]]; then
-    show_hint "commit-ai" "$NAME" "$MODEL" "--no-edit"
     git commit -m "$message"
     echo "✅ Commit created!"
     exit 0
