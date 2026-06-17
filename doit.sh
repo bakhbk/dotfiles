@@ -376,32 +376,55 @@ if [[ "$ACTION" == "commit-ai" ]]; then
     tmpfiles=$(mktemp)
     trap 'rm -f "$tmpmsg" "$tmpfiles"' EXIT
     
-    # Step 1: get file list with change counts
+
+    
+    # Step 1: get file list with change counts (include all files, no exclusions)
     git diff --name-only --staged 2>/dev/null | while IFS= read -r fname; do
+      # Skip only metadata/lock files that are never meaningful for commit messages
       case "$fname" in
-        *.lock|*.sum|README*|.gitignore|LICENSE*) continue ;;
-        *.png|*.jpg|*.gif|*.ico|*.pdf) continue ;;
+        *.lock|*.sum) continue ;;
+      esac
+      # Skip README/LICENSE/gitignore — they rarely change and aren't meaningful for commit messages
+      case "$fname" in
+        README*|.gitignore|LICENSE*) continue ;;
+      esac
+      # For large files (>100KB) or binary/image types, count changes but mark as "light"
+      file_size=$(stat -f%z "$fname" 2>/dev/null || stat -c%s "$fname" 2>/dev/null || echo 0)
+      is_light=0
+      if [[ $file_size -gt 102400 ]]; then
+        is_light=1
+      fi
+      case "$fname" in
+        *.png|*.jpg|*.gif|*.ico|*.pdf|*.svg|*.webp) is_light=1 ;;
       esac
       cnt=$(git diff --staged "$fname" 2>/dev/null | grep '^[-+]' | grep -cv '^[+-]\{3\}' 2>/dev/null || true)
       cnt=${cnt:-0}
       cnt=$(echo "$cnt" | tr -d '[:space:]')
       [[ -z "$cnt" ]] && cnt=0
-      printf '%s:%s\n' "$cnt" "$fname"
-    done | sort -t: -k1nr | head -n 10 > "$tmpfiles"
+      # Format: is_light:cnt:fname (is_light=1 means only filename will be shown)
+      printf '%s:%s:%s\n' "$is_light" "$cnt" "$fname"
+    done | sort -t: -k2nr | head -n 10 > "$tmpfiles"
     
     # Step 2: build diff output
     DIFF=""
-    while IFS=: read -r cnt fname; do
+    while IFS=: read -r is_light cnt fname; do
       [[ -z "$fname" ]] && continue
       DIFF+="--- $fname ---\n"
-      DIFF+=$(git diff --staged -U3 "$fname" 2>/dev/null | head -n 60 || true)
+      if [[ "$is_light" -eq 1 ]]; then
+        # For large/binary/image files: only show filename, no diff content
+        DIFF+="[binary/large file — $cnt lines changed]\n"
+      else
+        # For source files: show up to 150 lines of diff with context
+        DIFF+=$(git diff --staged -U3 "$fname" 2>/dev/null | head -n 150 || true)
+      fi
       DIFF+="\n"
     done < "$tmpfiles"
     
     local_file_count=$(git diff --name-only --staged 2>/dev/null | wc -l)
     src_files=$(echo "$DIFF" | grep -c '^---' 2>/dev/null || echo 0)
     src_files=${src_files:-0}
-    echo "🔍 Smart mode: $src_files source files ($local_file_count total changed, ~10 most modified selected)"
+    echo "🔍 Smart mode: $src_files files ($local_file_count total changed, ~10 most modified selected)"
+    echo "📋 Diff payload size: $(echo -n "$DIFF" | wc -c) bytes"
   fi
 
   # --- Build JSON payload for LLM ---
