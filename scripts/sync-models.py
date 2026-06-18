@@ -270,6 +270,41 @@ def _normalize_v1_model_id(model_id: str) -> str:
     return normalized
 
 
+def _parse_v1_models_details(response_data: dict) -> tuple[dict, dict]:
+    """Парсит meta из /v1/models response для получения контекста и vision.
+
+    Returns:
+        (id_to_details, normalized_id_map) где:
+          id_to_details = {model_id: properties} — по model ID
+          normalized_id_map = {normalized_id: model_id}
+    """
+    result: dict = {}
+    normalized_map: dict[str, str] = {}  # norm_id -> model_id
+
+    models_list = response_data.get("data", [])
+    for m in models_list:
+        model_id = m.get("id")
+        if not model_id:
+            continue
+
+        meta = m.get("meta", {})
+        caps = m.get("capabilities", [])
+
+        rd: dict = {}
+        if meta:
+            ctx_train = meta.get("n_ctx_train")
+            if ctx_train:
+                rd["max_context_length"] = int(ctx_train)
+        if "multimodal" in caps:
+            rd["vision"] = True
+
+        if rd:  # только если есть хотя бы одно поле
+            result[model_id] = rd
+            normalized_map[_normalize_v1_model_id(model_id)] = model_id
+
+    return result, normalized_map
+
+
 def _parse_lmstudio_details(response_data: dict) -> tuple[dict, dict]:
     """Парсит расширенный LM Studio API response.
 
@@ -363,11 +398,20 @@ def fetch_models(url: str, api_key: str = "") -> tuple[list[str], dict]:
             ext_data = json.loads(ext_raw)
         raw_details, normalized_map, reverse_map = _parse_lmstudio_details(ext_data)
     except Exception as e:
-        print(f"  warn: не удалось получить расширенные данные с {extended_url}: {e}")
+        print(f"  [api/v1] нет расширенных данных с {extended_url}")
+        # Fallback: парсим meta из /v1/models
+        if model_ids and data:
+            fallback_details, fallback_map = _parse_v1_models_details(data)
+            if fallback_details:
+                raw_details = fallback_details
+                normalized_map = fallback_map
+                n = len(fallback_details)
+                word = "модель" if n == 1 else ("модели" if n < 5 else "моделей")
+                print(f"  [v1] получено {n} {word} из /v1/models")
     else:
         if raw_details and normalized_map:
-            print(f"  [lmstudio] получено {len(raw_details)} моделей с расширенными свойствами")
-            print(f"  [lmstudio] маппинг {len(normalized_map)} ID из /v1→key")
+            print(f"  [api/v1] получено {len(raw_details)} моделей с расширенными свойствами")
+            print(f"  [api/v1] маппинг {len(normalized_map)} ID из /v1→key")
 
     return model_ids, raw_details, normalized_map, reverse_map
 
@@ -1030,7 +1074,6 @@ def sync_code_profiles() -> int:
             tmp.parent.mkdir(parents=True, exist_ok=True)
             tmp.write_text(json.dumps(source_data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
             tmp.replace(dest_path)
-            print(f"{printed} -> {dest_path}")
             copied += 1
         except Exception as e:
             print(f"sync_code_profiles: ошибка при записи {dest_path}: {e}")
