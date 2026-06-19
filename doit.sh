@@ -98,6 +98,7 @@ NO_EDIT=0           # --no-edit: skip editor in commit-ai
 FULL_DIFF=0         # -f: use full diff (not smart mode) in commit-ai
 VERBOSE=0           # -v: enable bash debug mode
 DRY_RUN=0           # --dry-run: show generated message, don't commit
+THINK=false         # --think: enable thinking/reasoning for commit (disabled by default)
 
 PROVIDER=""         # --provider: explicit provider name
 ACTION=""           # --action: explicit action (copilot|commit-ai|by-pi|by-opencode)
@@ -112,6 +113,7 @@ while [[ $# -gt 0 ]]; do
     -n|--no-edit)      NO_EDIT=1; shift ;;
     -v|--verbose)      VERBOSE=1; shift ;;
     --dry-run)         DRY_RUN=1; shift ;;
+    --think)           THINK=true; shift ;;
     --provider)        PROVIDER="$2"; shift 2 ;;
     --action)          ACTION="$2"; shift 2 ;;
     --model)           MODEL_OVERRIDE="$2"; shift 2 ;;
@@ -428,15 +430,27 @@ if [[ "$ACTION" == "commit-ai" ]]; then
   fi
 
   # --- Build JSON payload for LLM ---
-  payload=$(jq -n --arg diff "$DIFF" --arg model "$MODEL" '{
-    model: $model,
-    messages: [
-      {role: "system", content: "Output ONLY a git commit message. First line MUST start with one of these exact words: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert. Then a colon and space, then the description. Example: feat(auth): add login page\n\nDo NOT output any other text before or after the commit message. No greetings, no explanations, no conversational phrases like I will, Let me, Here is."},
-      {role: "user", content: ("Generate a commit message for this diff:\n\n" + $diff)}
-    ],
-    max_tokens: 1000,
-    temperature: 0.2
-  }')
+  payload=$(jq -n \
+    --arg diff "$DIFF" \
+    --arg model "$MODEL" \
+    --argjson think "$THINK" '{
+  model: $model,
+  messages: [
+    {role: "system", content: "Output ONLY a git commit message. First line MUST start with one of these exact words: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert. Then a colon and space, then the description. Example: feat(auth): add login page\n\nDo NOT output any other text before or after the commit message. No greetings, no explanations, no conversational phrases like I will, Let me, Here is."},
+    {role: "user", content: ("Generate a commit message for this diff:\n\n" + $diff)}
+  ],
+  max_tokens: 1000,
+  temperature: 0.2,
+
+  think:        $think,
+  reasoning:    $think,
+  enable_thinking: $think,
+  reasoning_effort: "none",
+
+  chat_template_kwargs: {enable_thinking: $think, thinking: $think},
+
+  reasoning_config: {enabled: $think}
+}')
 
   echo "🌐 Calling API: ${BASE_URL}/chat/completions"
   if [[ -n "$API_KEY" ]]; then
