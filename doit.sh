@@ -430,14 +430,19 @@ if [[ "$ACTION" == "commit-ai" ]]; then
   fi
 
   # --- Build JSON payload for LLM ---
+
+  # Staged file statuses (M/D/A/R) — additional context for LLM to detect deletions
+  name_status=$(git diff --staged --name-status 2>/dev/null || true)
+
   payload=$(jq -n \
     --arg diff "$DIFF" \
+    --arg name_status "$name_status" \
     --arg model "$MODEL" \
     --argjson think "$THINK" '{
   model: $model,
   messages: [
     {role: "system", content: "Output ONLY a git commit message. First line MUST start with one of these exact words: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert. Then a colon and space, then the description. Example: feat(auth): add login page\n\nDo NOT output any other text before or after the commit message. No greetings, no explanations, no conversational phrases like I will, Let me, Here is."},
-    {role: "user", content: ("Generate a commit message for this diff:\n\n" + $diff)}
+    {role: "user", content: ("Generate a commit message for this diff:\n\n" + $diff + (if ($name_status|length) > 0 then "\nStaged file statuses:\n" + $name_status else empty end))}
   ],
   max_tokens: 1000,
   temperature: 0.2,
