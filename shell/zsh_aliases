@@ -28,6 +28,10 @@ alias -g F='|fzf --preview="cat {}"'
 if [[ "$OSTYPE" = darwin* ]]; then
     alias -g CP='|pbcopy'
     alias -g PP='|pbpaste'
+
+    # File flags (chflags)
+    alias uch='sudo chflags uchg'   # lock file from changes
+    alias nouch='sudo chflags nouchg'  # unlock file
 fi
 
 # Tools
