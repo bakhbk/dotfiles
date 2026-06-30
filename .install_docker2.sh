@@ -35,7 +35,8 @@ if [ "$OS" == "Linux" ]; then
 
   echo "Docker and Docker Compose installation completed!"
   echo "To verify Docker, run: docker --version"
-  echo "To verify Docker Compose, run: docker-compose --version"
+  echo "To verify Docker, run: docker --version"
+  echo "To verify Docker Compose, run: docker compose version (or docker-compose --version)"
   echo "You may need to log out and back in to use Docker without sudo."
 
 elif [ "$OS" == "Darwin" ]; then
@@ -66,9 +67,9 @@ else
 fi
 
 # Проверяем, установлен ли Docker Compose
-if ! command -v docker-compose &>/dev/null; then
+if command -v docker-compose &>/dev/null || docker compose version &>/dev/null; then
+  echo "✅ docker-compose installation completed!"
+else
   echo "Docker Compose installation failed. Please check logs and install manually."
   exit 1
-else
-  echo "✅ docker-compose installation completed!"
 fi
