@@ -9,6 +9,7 @@ cci "protoc" "brew install protobuf"
 cci "task" "brew install go-task"
 cci "grpcui" "brew install grpcui"
 cci "mjml" "brew install mjml"
+cci "cocoapods" "brew install cocoapods"
 
 export PATH="$HOME/.fvm/default/bin:$PATH"
 export PATH="$HOME/.pub-cache/bin:$PATH"
