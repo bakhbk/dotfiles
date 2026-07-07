@@ -3,7 +3,7 @@
 function printhead() {
   clear
   echo "-----------------------------------"
-  echo "Numizma Setup Script"
+  echo " Setup Script"
   echo "-----------------------------------"
   echo ""
   echo "=== $1 ===";
