@@ -33,6 +33,15 @@ ccv() {
   )
 }
 
+get_latest_stable_fvm() {
+  local ver
+  ver=$(fvm releases -c stable 2>/dev/null | \
+        sed 's/\x1b\[[0-9;]*m//g' | \
+        grep 'stable' | tail -1 | \
+        awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) print $i}')
+  echo "${ver:-3.44.5}"
+}
+
 add_to_zshrc() {
   local line="$1"
   printhead "Добавляем в ~/.zshrc... $line"

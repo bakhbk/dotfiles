@@ -3,8 +3,6 @@
 SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]:-$0}")"
 source "$SCRIPT_DIR/common.sh"
 
-FVM_VERSION=${1:-"3.41.9"}
-
 cci "brew" "/bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
 cci "fvm" "curl -fsSL https://fvm.app/install.sh | bash"
 cci "protoc" "brew install protobuf"
@@ -14,6 +12,15 @@ cci "mjml" "brew install mjml"
 
 export PATH="$HOME/.fvm/default/bin:$PATH"
 export PATH="$HOME/.pub-cache/bin:$PATH"
+
+# === Определяем Flutter версию ПОСЛЕ установки FVM и PATH ===
+if [ -n "$1" ]; then
+  FVM_VERSION="$1"
+else
+  printhead "Определяем последнюю стабильную Flutter версию..."
+  FVM_VERSION=$(get_latest_stable_fvm)
+  echo "→ Выбрана версия: $FVM_VERSION"
+fi
 
 # === Установляем глобальную FVM версию ===
 printhead "Устанавливаем Flutter версию $FVM_VERSION..."
