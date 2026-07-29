@@ -388,3 +388,38 @@ gitdo() {
  done
  echo ""
 }
+
+# AI Agent runner
+# Usage: aigent "task"
+aigent() {
+    if [ -z "$1" ]; then
+        echo "Usage: aigent \"task\""
+        return 1
+    fi
+    cd ~/dotfiles/scripts && uv run ./aigent.py "$@"
+}
+
+# KR Jarvis AI Agent
+# Usage: krbot "task"
+krbot() {
+    if [ -z "$1" ]; then
+        echo "Usage: krbot \"task\""
+        return 1
+    fi
+    local conf="$HOME/.config/dispatch/providers.conf"
+    local script_dir="$HOME/dotfiles/scripts"
+    if [ ! -f "$conf" ]; then
+        echo "Error: $conf not found"
+        return 1
+    fi
+    local url key model
+    url=$(awk '/\[kr-jarvis\]/{f=1} f&&/^url=/{sub(/^url=/,""); print; exit}' "$conf")
+    key=$(awk '/\[kr-jarvis\]/{f=1} f&&/^key=/{sub(/^key=/,""); print; exit}' "$conf")
+    model=$(awk '/\[kr-jarvis\]/{f=1} f&&/^last_model=/{sub(/^last_model=/,""); sub(/\.gguf$/,"",$0); sub(/-Q[0-9]*_K.*/,""); print tolower($0); exit}' "$conf")
+    if [ -z "$url" ] || [ -z "$key" ]; then
+        echo "Error: url/key not found in $conf"
+        return 1
+    fi
+    export LLM_BASE_URL="$url" LLM_API_KEY="$key" LLM_MODEL="$model"
+    cd "$script_dir" && uv run ./aigent.py "$@"
+}
