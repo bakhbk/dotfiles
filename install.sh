@@ -9,6 +9,7 @@ set -euxo pipefail
 ./installers/install_clipboard_helpers.sh || true
 
 CONFIGS=(
+  shell/bash_tools
   shell/zsh_aliases
   shell/zsh_tools
   shell/zshenv
@@ -31,6 +32,7 @@ CONFIGS=(
 CONFIGS_HOME_DIR=(
   tmux/.tmux.conf
   shell/.zshrc
+  shell/.bashrc
 )
 
 if [ $# -eq 0 ]; then

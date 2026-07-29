@@ -54,11 +54,12 @@ def call_tool(name: str, arguments: dict) -> str:
     except Exception as e:
         return f"Error calling {name}: {e}"
 
+LLM_HEADERS = {"Content-Type": "application/json", "Authorization": f"Bearer {LLM_API_KEY}"}
+
 def call_llm(messages):
-    payload = {"model": LLM_MODEL, "messages": messages,
+    payload = {"model": LLM_MODEL, "messages": messages, "tools": LLM_TOOLS, "tool_choice": "auto",
                "temperature": 0.1, "max_tokens": 4096}
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {LLM_API_KEY}"}
-    resp = requests.post(f"{LLM_BASE_URL}/chat/completions", json=payload, headers=headers)
+    resp = requests.post(f"{LLM_BASE_URL}/chat/completions", json=payload, headers=LLM_HEADERS)
     resp.raise_for_status()
     msg = resp.json()["choices"][0]["message"]
     content = (msg.get("content") or "").strip()
