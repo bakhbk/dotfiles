@@ -34,6 +34,9 @@ if [[ "$OSTYPE" = darwin* ]]; then
     alias nouch='sudo chflags nouchg'  # unlock file
 fi
 
+# Aliases for applications
+alias mchrome='open -n -a "Google Chrome" --args --user-data-dir="$HOME/.config/.chrome-mog-profile" --disable-web-security'
+
 # Tools
 alias df='df -h'
 alias du='du -h'
