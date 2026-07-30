@@ -396,7 +396,8 @@ aigent() {
         echo "Usage: aigent \"task\""
         return 1
     fi
-    cd ~/dotfiles/scripts && uv run ./aigent.py "$@"
+    unset LLM_BASE_URL LLM_API_KEY LLM_MODEL
+    (cd ~/dotfiles/scripts && uv run ./aigent.py "$@")
 }
 
 # KR Jarvis AI Agent
@@ -421,5 +422,5 @@ krbot() {
         return 1
     fi
     export LLM_BASE_URL="$url" LLM_API_KEY="$key" LLM_MODEL="$model"
-    cd "$script_dir" && uv run ./aigent.py "$@"
+    (cd "$script_dir" && uv run ./aigent.py "$@")
 }

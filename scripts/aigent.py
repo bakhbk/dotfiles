@@ -67,6 +67,8 @@ def call_llm(messages):
     return content, tool_calls
 
 def agent_loop(user_message: str) -> None:
+    print(f"🔗 {LLM_BASE_URL}")
+    print(f"🤖 Model: {LLM_MODEL}")
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_message}
