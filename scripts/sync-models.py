@@ -65,6 +65,7 @@ ZED_MODEL_DEFAULTS = {
 # Дефолтные значения для apiKey в pi models.json
 PI_API_KEY_DEFAULTS = {
     "lmstudio": "lm-studio",
+    "local-lms": "none",
 }
 
 # Timeout для HTTP-запросов (сек)
