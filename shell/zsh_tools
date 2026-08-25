@@ -426,13 +426,13 @@ krbot() {
 }
 
 
-# Select a file via fzf (preview: first 20 lines), print its path,
+# Select a file via fzf (preview: first 75 lines, truncated to 250 chars), print its path,
 # and copy its CONTENTS to the system clipboard (pbcopy/wl-copy/xclip).
 # Usage: fs [dir-or-glob]   (default: ~/.agents/prompts)
 fs() {
     local dir="${1:-$HOME/.agents/prompts}"
     local f
-    f=$(find "$dir" -maxdepth 1 -type f | fzf --preview 'head -20 {}') || return
+    f=$(find "$dir" -maxdepth 1 -type f | fzf --preview-window=nowrap --preview 'head -75 {} | cut -c1-250') || return
     [ -z "$f" ] && return
     echo "$f"
     if command -v pbcopy >/dev/null 2>&1; then
