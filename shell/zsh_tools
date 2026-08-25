@@ -424,3 +424,23 @@ krbot() {
     export LLM_BASE_URL="$url" LLM_API_KEY="$key" LLM_MODEL="$model"
     (cd "$script_dir" && uv run ./aigent.py "$@")
 }
+
+
+# Select a file via fzf (preview: first 20 lines), print its path,
+# and copy its CONTENTS to the system clipboard (pbcopy/wl-copy/xclip).
+# Usage: fs [dir-or-glob]   (default: ~/.agents/prompts)
+fs() {
+    local dir="${1:-$HOME/.agents/prompts}"
+    local f
+    f=$(find "$dir" -maxdepth 1 -type f | fzf --preview 'head -20 {}') || return
+    [ -z "$f" ] && return
+    echo "$f"
+    if command -v pbcopy >/dev/null 2>&1; then
+        cat "$f" | pbcopy
+    elif command -v wl-copy >/dev/null 2>&1; then
+        cat "$f" | wl-copy
+    else
+        cat "$f" | xclip -selection clipboard
+    fi
+    echo "✓ contents copied to clipboard"
+}
