@@ -390,23 +390,71 @@ gitdo() {
 }
 
 # AI Agent runner
-# Usage: aigent "task"
+# Usage: aigent [-s "system prompt"] "task"
 aigent() {
-    if [ -z "$1" ]; then
-        echo "Usage: aigent \"task\""
+    local custom_system_prompt=""
+    local task_args=()
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -s|--system-prompt)
+                if [ $# -lt 2 ]; then
+                    echo "Error: $1 requires an argument"
+                    return 1
+                fi
+                custom_system_prompt="$2"
+                shift 2
+                ;;
+            *)
+                task_args+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    if [ ${#task_args[@]} -eq 0 ]; then
+        echo "Usage: aigent [-s \"system prompt\"] \"task\""
         return 1
     fi
+
     unset LLM_BASE_URL LLM_API_KEY LLM_MODEL
-    (cd ~/dotfiles/scripts && uv run ./aigent.py "$@")
+
+    if [ -n "$custom_system_prompt" ]; then
+        (cd ~/dotfiles/scripts && uv run ./aigent.py -s "$custom_system_prompt" "${task_args[@]}")
+    else
+        (cd ~/dotfiles/scripts && uv run ./aigent.py "${task_args[@]}")
+    fi
 }
 
 # KR Jarvis AI Agent
-# Usage: krbot "task"
+# Usage: krbot [-s "system prompt"] "task"
 krbot() {
-    if [ -z "$1" ]; then
-        echo "Usage: krbot \"task\""
+    local custom_system_prompt=""
+    local task_args=()
+
+    # Parse flags: -s/--system-prompt takes one argument, everything else is task
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -s|--system-prompt)
+                if [ $# -lt 2 ]; then
+                    echo "Error: $1 requires an argument"
+                    return 1
+                fi
+                custom_system_prompt="$2"
+                shift 2
+                ;;
+            *)
+                task_args+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    if [ ${#task_args[@]} -eq 0 ]; then
+        echo "Usage: krbot [-s \"system prompt\"] \"task\""
         return 1
     fi
+
     local conf="$HOME/.config/dispatch/providers.conf"
     local script_dir="$HOME/dotfiles/scripts"
     if [ ! -f "$conf" ]; then
@@ -422,7 +470,12 @@ krbot() {
         return 1
     fi
     export LLM_BASE_URL="$url" LLM_API_KEY="$key" LLM_MODEL="$model"
-    (cd "$script_dir" && uv run ./aigent.py "$@")
+
+    if [ -n "$custom_system_prompt" ]; then
+        (cd "$script_dir" && uv run ./aigent.py -s "$custom_system_prompt" "${task_args[@]}")
+    else
+        (cd "$script_dir" && uv run ./aigent.py "${task_args[@]}")
+    fi
 }
 
 

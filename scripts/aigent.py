@@ -7,7 +7,7 @@
 import json, sys, subprocess, os
 import requests
 
-LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://192.168.0.100:1234/v1")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:8080/v1")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "none")
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen")
 MAX_TURNS = 1000
@@ -66,11 +66,11 @@ def call_llm(messages):
     tool_calls = msg.get("tool_calls") or []
     return content, tool_calls
 
-def agent_loop(user_message: str) -> None:
+def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> None:
     print(f"🔗 {LLM_BASE_URL}")
     print(f"🤖 Model: {LLM_MODEL}")
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_message}
     ]
     for turn in range(1, MAX_TURNS + 1):
@@ -95,8 +95,16 @@ def agent_loop(user_message: str) -> None:
     print(f"\n⚠️  Max turns ({MAX_TURNS}) reached. Stopping.")
 
 if __name__ == "__main__":
-    prompt = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else ""
-    if not prompt.strip():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="LLM coding agent")
+    parser.add_argument("prompt", nargs="?", help="Task description")
+    parser.add_argument("-s", "--system-prompt", default=None, help="Custom system prompt")
+    args = parser.parse_args()
+
+    if not args.prompt:
         print("No task provided. Exiting.")
         sys.exit(1)
-    agent_loop(prompt)
+
+    system_prompt = args.system_prompt if args.system_prompt else SYSTEM_PROMPT
+    agent_loop(args.prompt, system_prompt=system_prompt)
