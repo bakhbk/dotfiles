@@ -106,5 +106,5 @@ if __name__ == "__main__":
         print("No task provided. Exiting.")
         sys.exit(1)
 
-    system_prompt = args.system_prompt if args.system_prompt else SYSTEM_PROMPT
+    system_prompt = args.system_prompt if args.system_prompt is not None else SYSTEM_PROMPT
     agent_loop(args.prompt, system_prompt=system_prompt)
