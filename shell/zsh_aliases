@@ -1,7 +1,6 @@
 # Purprose:
 # Aliases for zsh.
 # For a full list of active aliases, run `alias`.
-
 # Global aliases
 alias -g G='|grep'
 alias -g M='|more'
@@ -218,3 +217,10 @@ alias aider-llama='aider --model ollama/llama3.2:3b'
 alias olist='ollama list'
 alias orun='ollama run llama3.2:3b'
 alias trnsl='uv run ~/dotfiles/scripts/trnsl/trnsl.py'
+
+# Quick prompt editor
+# Quick prompt editor
+pp() { echo "" > /tmp/prompt.md && nvim /tmp/prompt.md && PP="$(cat /tmp/prompt.md)" ; }
+
+# Quick prompt + pi
+ppi() { pp && pi -ne -ns -np --system-prompt "$PP" "$@"; }
