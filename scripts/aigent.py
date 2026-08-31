@@ -4,7 +4,7 @@
 # dependencies = ["requests>=2.31.0"]
 # ///
 
-import json, sys, subprocess, os
+import json, sys, subprocess, os, uuid
 import requests
 
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:8080/v1")
@@ -45,6 +45,13 @@ def run_bash(command: str) -> str:
     except subprocess.TimeoutExpired:
         return "Error: command timed out after 120s"
 
+def save_result(content: str, reason: str = "") -> str:
+    filename = f"/tmp/aigent-py-{uuid.uuid4().hex[:8]}.md"
+    with open(filename, "w") as f:
+        f.write(content or f"({reason})")
+    print(f"💾 Saved to {filename}")
+    return filename
+
 def call_tool(name: str, arguments: dict) -> str:
     func = {"bash": run_bash}.get(name)
     if not func:
@@ -81,6 +88,7 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> None:
         if not tool_calls:
             print("(no text output)" if not content else "")
             print("✅ Agent finished")
+            save_result(content, "no output" if not content else "")
             return
         prefix = "\n" if content else ""
         for tc in tool_calls:
@@ -93,6 +101,7 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> None:
             messages.append({"role": "assistant", "content": content or None, "tool_calls": [tc]})
             messages.append({"role": "tool", "tool_call_id": tid, "content": result})
     print(f"\n⚠️  Max turns ({MAX_TURNS}) reached. Stopping.")
+    save_result("", "max turns reached")
 
 if __name__ == "__main__":
     import argparse
