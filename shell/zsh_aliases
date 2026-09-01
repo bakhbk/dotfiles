@@ -224,3 +224,6 @@ pp() { echo "" > /tmp/prompt.md && nvim /tmp/prompt.md && PP="$(cat /tmp/prompt.
 
 # Quick prompt + pi
 ppi() { pp && pi -ne -ns -np --system-prompt "$PP" "$@"; }
+
+# Prep agents — sync models across all AI tools
+alias prep='uv run ~/dotfiles/scripts/prep-agents/prep-agents.py'
