@@ -226,4 +226,9 @@ pp() { echo "" > /tmp/prompt.md && nvim /tmp/prompt.md && PP="$(cat /tmp/prompt.
 ppi() { pp && pi -ne -ns -np --system-prompt "$PP" "$@"; }
 
 # Prep agents — sync models across all AI tools
+# Prep agents — sync models across all AI tools
 alias prep='uv run ~/dotfiles/scripts/prep-agents/prep-agents.py'
+alias prep-fast='uv run ~/dotfiles/scripts/prep-agents/prep-agents.py --max-context 8000'
+alias prep-code='uv run ~/dotfiles/scripts/prep-agents/prep-agents.py --max-context 16000'
+alias prep-deep='uv run ~/dotfiles/scripts/prep-agents/prep-agents.py --max-context 32000'
+alias prep-big='uv run ~/dotfiles/scripts/prep-agents/prep-agents.py --max-context 64000'
