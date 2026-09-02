@@ -211,8 +211,10 @@ def ensure_model(requested: str) -> str:
 
     # Always show picker — let user choose
     local = []
+
+    # Ensure server is running
     try:
-        result = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=10)
+        result = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=5)
         if result.returncode == 0:
             for line in result.stdout.strip().split("\n")[1:]:  # skip header
                 name = line.split()[0] if line else ""
@@ -220,6 +222,23 @@ def ensure_model(requested: str) -> str:
                     local.append(name)
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
+
+    # If no models found, try to start server
+    if not local:
+        console.print("[dim]Ollama server not running, starting it...[/dim]")
+        subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        import time
+        time.sleep(5)
+        # Check again
+        try:
+            result = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                for line in result.stdout.strip().split("\n")[1:]:  # skip header
+                    name = line.split()[0] if line else ""
+                    if name:
+                        local.append(name)
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
 
     console.print(
         "\n[bold yellow]Select a model to use "
