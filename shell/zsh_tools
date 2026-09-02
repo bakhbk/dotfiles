@@ -497,3 +497,110 @@ fs() {
     fi
     echo "✓ contents copied to clipboard"
 }
+
+
+netcheck() {
+    local -a targets=("$@")
+    [ ${#targets[@]} -eq 0 ] && targets=(8.8.8.8 1.1.1.1 yandex.ru baidu.com google.co.jp google.de)
+    local timeout=2
+    
+    echo "🔍 Проверка сети"
+    echo "======================="
+    
+    # Локальная сеть
+    echo ""
+    echo "📡 Локальная сеть:"
+    
+    # Локальный IP
+    local my_ip
+    if [[ "$OSTYPE" = darwin* ]]; then
+        local _iface=$(route get default 2>/dev/null | awk '/interface:/ {print $2}')
+        my_ip=$(ipconfig getifaddr "$_iface" 2>/dev/null || echo 'n/a')
+    else
+        my_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'n/a')
+    fi
+    echo "   🖥️  Твой IP: $my_ip"
+    
+    # Публичный IP
+    local pub_ip="n/a"
+    if [[ "$OSTYPE" = darwin* ]]; then
+        pub_ip=$(curl -s --max-time 2 --fail https://ifconfig.me 2>/dev/null || curl -s --max-time 2 --fail https://icanhazip.com 2>/dev/null || echo 'n/a')
+    else
+        pub_ip=$(curl -s --max-time 2 --fail https://ifconfig.me 2>/dev/null || echo 'n/a')
+    fi
+    echo "   🌐 Публичный IP: $pub_ip"
+    
+    # Роутер/шлюз
+    local gw
+    if [[ "$OSTYPE" = darwin* ]]; then
+        gw=$(route get default 2>/dev/null | awk '/gateway: / {print $2}')
+    else
+        gw=$(ip route 2>/dev/null | grep default | awk '{print $3}' | head -1)
+    fi
+    if [ -n "$gw" ] && [ "$gw" != "(default)" ]; then
+        echo "   📶 Роутер: $gw"
+        if timeout $timeout ping -c 1 "$gw" &>/dev/null; then
+            echo "   ✅ Роутер доступен"
+        else
+            echo "   ❌ Роутер не отвечает — проверь Wi-Fi/кабель"
+        fi
+    else
+        echo "   ❌ Шлюз не найден — нет подключения к сети"
+    fi
+    
+    # Внешние хосты
+    echo ""
+    echo "🌐 Внешние серверы:"
+    
+    local count=0 passed=0 failed=0 dns_ok=false ping_ip=false
+    for t in "${targets[@]}"; do
+        count=$((count + 1))
+        echo "[$count/${#targets[@]}] $t..."
+        
+        if [[ "$t" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            if timeout $timeout ping -c 1 "$t" &>/dev/null; then
+                echo "   ✅ OK"
+                passed=$((passed + 1))
+                ping_ip=true
+            else
+                echo "   ❌ FAIL (${timeout}s)"
+                failed=$((failed + 1))
+            fi
+        else
+            local ip=""
+            if timeout $timeout nslookup "$t" &>/dev/null; then
+                ip=$(nslookup "$t" 2>/dev/null | grep "Address:" | tail -1 | awk '{print $2}')
+                dns_ok=true
+                if timeout $timeout ping -c 1 "$t" &>/dev/null; then
+                    echo "   ✅ OK → $ip"
+                    passed=$((passed + 1))
+                else
+                    echo "   ⚠️  TIMEOUT (${timeout}s)"
+                    failed=$((failed + 1))
+                fi
+            else
+                echo "   ❌ DNS FAIL (${timeout}s)"
+                failed=$((failed + 1))
+            fi
+        fi
+    done
+    
+    # Итог
+    echo ""
+    echo "======================="
+    if [ $passed -eq $count ]; then
+        echo "✅ интернет работает"
+    elif [ $dns_ok = false ] && [ $ping_ip = true ]; then
+        echo "⚠️  DNS не работает — проверь настройки DNS"
+    elif [ $ping_ip = false ] && [ $dns_ok = true ]; then
+        echo "⚠️  Нет доступа наружу — проверь фаервол/прокси"
+    elif [ $failed -eq $count ]; then
+        if [ -z "$gw" ] || [ "$gw" = "(default)" ]; then
+            echo "❌ Нет сети — проверь Wi-Fi/кабель"
+        else
+            echo "❌ Нет интернета — проблема у провайдера"
+        fi
+    else
+        echo "⚠️  Частичное подключение — некоторые серверы не доступны"
+    fi
+}
