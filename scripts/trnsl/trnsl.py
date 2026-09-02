@@ -18,6 +18,7 @@ Model:  TRNSL_MODEL env var, default: qwen2.5:7b
 """
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -31,18 +32,16 @@ console = Console()
 
 DEFAULT_MODEL = os.environ.get("TRNSL_MODEL", "qwen2.5:7b")
 CHUNK_SOFT_LIMIT = 2000  # chars
+TRNSL_CONFIG_DIR = Path.home() / ".config" / "trnsl"
+TRNSL_MODELS_DB = TRNSL_CONFIG_DIR / "models.json"
 
-# Curated list for translation. smollm2:135m first as the minimal default.
+# Curated list for translation — models up to 1 GB.
 # Format: (model_tag, size_label, description)
 TRANSLATION_MODELS = [
-    ("smollm2:135m", "270MB", "Старт — минимальный размер, базовый перевод (ru/en)"),
-    ("qwen2.5:0.5b", "394MB", "Лёгкая — хороший мультиязычный (ru/en/de/fr/zh)"),
-    ("gemma3:1b",    "815MB", "Google — ru/en/de/fr/es, сохраняет стиль"),
-    ("qwen2.5:1.5b", "986MB", "Средняя — качественный перевод, все языки"),
-    ("qwen2.5:3b",   "1.9GB", "Баланс — лучший выбор для юридических текстов"),
-    ("mistral:7b",   "4.1GB", "Mistral — лучший для европейских языков (de/fr/es/it)"),
-    ("aya:8b",       "4.8GB", "Aya (Cohere) — специализирован на 23 языках"),
-    ("qwen2.5:7b",   "4.7GB", "Топ — максимальное качество, все языки включая zh/ar"),
+    ("smollm2:135m", "270MB",  "Старт — минимальный, базовый перевод (ru/en/de/fr)"),
+    ("qwen2.5:0.5b", "394MB",  "Лёгкая — хороший мультиязык (ru/en/de/fr/zh)"),
+    ("gemma3:1b",    "815MB",  "Google — ru/en/de/fr/es, сохраняет стиль"),
+    ("qwen2.5:1.5b", "986MB",  "Средняя — качественный перевод, все языки"),
 ]
 
 LANG_NAMES = {
@@ -64,18 +63,72 @@ SYSTEM_PROMPT = (
 )
 
 
-def list_local_models() -> list[str]:
+def load_models_db() -> dict[str, bool]:
+    """Load the models database from ~/.config/trnsl/models.json."""
+    TRNSL_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    if TRNSL_MODELS_DB.exists():
+        try:
+            return json.loads(TRNSL_MODELS_DB.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def save_models_db(db: dict[str, bool]) -> None:
+    """Save the models database to ~/.config/trnsl/models.json."""
+    TRNSL_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    TRNSL_MODELS_DB.write_text(json.dumps(db, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def model_exists_on_disk(model: str) -> bool:
+    """Check if a model actually exists in Ollama's storage via CLI."""
+    # Try ollama list first (works offline)
     try:
-        return [m.model for m in ollama.list().models]
-    except Exception:
-        return []
+        result = subprocess.run(
+            ["ollama", "list"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if result.returncode == 0:
+            for line in result.stdout.strip().split("\n")[1:]:  # skip header
+                name = line.split()[0] if line else ""
+                if name == model:
+                    return True
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    # Fallback: check filesystem directly (works even if ollama CLI is broken)
+    manifests_dir = Path.home() / ".ollama/models/manifests/registry.ollama.ai/library"
+    if not manifests_dir.exists():
+        return False
+    prefix = model.replace(":", "_")
+    for f in manifests_dir.rglob(f"{prefix}*"):
+        if f.is_file():
+            return True
+    # Last resort: check blobs directory
+    blobs_dir = Path.home() / ".ollama/models/blobs"
+    if blobs_dir.exists():
+        for f in blobs_dir.iterdir():
+            if model.replace(":", "") in f.name:
+                return True
+    return False
 
 
-def pick_model_fzf() -> str | None:
-    """Show fzf picker with translation models. Returns model tag or None."""
+def pick_model_fzf(local_models: list[str]) -> str | None:
+    """Show fzf picker with translation models. Installed models first. Returns model tag or None."""
+    def sort_key(item):
+        tag = item[0]
+        installed = 0 if tag in local_models else 1
+        return (installed, tag)
+
+    sorted_models = sorted(TRANSLATION_MODELS, key=sort_key)
     lines = "\n".join(
-        f"{tag}|{size}|{desc}" for tag, size, desc in TRANSLATION_MODELS
+        f"{'✅' if tag in local_models else '☁️'} {tag}|{size}|{desc}"
+        for tag, size, desc in sorted_models
     )
+    header = "Enter: install | Ctrl+C: cancel"
+    if local_models:
+        header += f"\n✅ = installed | ☁️ = not installed"
     try:
         result = subprocess.run(
             [
@@ -84,7 +137,7 @@ def pick_model_fzf() -> str | None:
                 "--layout=reverse",
                 "--border=rounded",
                 "--prompt=Pick a translation model > ",
-                "--header=Enter: install | Ctrl+C: cancel",
+                f"--header={header}",
                 "--with-nth=1,2,3",
                 "--delimiter=|",
                 "--preview=echo {} | awk -F'|' '{print \"Model: \"$1\"  \"$2\"\\n\\n\"$3}'",
@@ -95,45 +148,104 @@ def pick_model_fzf() -> str | None:
             text=True,
         )
         if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip().split("|")[0]
+            raw = result.stdout.strip().split("|")[0]
+            # Remove emoji prefix
+            return raw.lstrip("✅☁️ ")
     except FileNotFoundError:
         pass
     return None
 
 
-def pick_model_menu() -> str | None:
-    """Fallback numbered menu when fzf is not available."""
+def pick_model_menu(local_models: list[str]) -> str | None:
+    """Fallback numbered menu when fzf is not available. Installed models first."""
+    def sort_key(item):
+        tag = item[0]
+        installed = 0 if tag in local_models else 1
+        return (installed, tag)
+
+    sorted_models = sorted(TRANSLATION_MODELS, key=sort_key)
     console.print("\n[bold yellow]Available translation models:[/bold yellow]\n")
-    for i, (tag, size, desc) in enumerate(TRANSLATION_MODELS, 1):
-        console.print(f"  [cyan]{i}[/cyan]  [bold]{tag}[/bold] [dim]({size})[/dim]  {desc}")
+    for i, (tag, size, desc) in enumerate(sorted_models, 1):
+        emoji = "✅" if tag in local_models else "☁️"
+        console.print(f"  [cyan]{i}[/cyan]  {emoji} [bold]{tag}[/bold] [dim]({size})[/dim]  {desc}")
     console.print()
     try:
         choice = input("Enter number (Enter = 1, Ctrl+C = cancel): ").strip()
         idx = (int(choice) - 1) if choice else 0
-        if 0 <= idx < len(TRANSLATION_MODELS):
-            return TRANSLATION_MODELS[idx][0]
+        if 0 <= idx < len(sorted_models):
+            return sorted_models[idx][0]
     except (ValueError, KeyboardInterrupt):
         pass
     return None
 
 
 def ensure_model(requested: str) -> str:
-    """If no local models exist — prompt user to pick and install one."""
-    if list_local_models():
-        return requested
+    """If requested model is not installed — prompt user to pick and install one."""
+    # Check if ollama is installed
+    try:
+        subprocess.run(["ollama", "--version"], capture_output=True, check=True)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        console.print(
+            "\n[red]Ollama is not installed.[/red]\n"
+            "To translate files, Ollama must be installed and running.\n\n"
+            "  [bold]brew install ollama[/bold]\n"
+            "  [dim](then run: ollama serve in background)[/dim]\n"
+        )
+        console.input("\n[bold]Press Enter to exit...[/bold]")
+        sys.exit(1)
+
+    # Load our models database
+    db = load_models_db()
+
+    # Always show picker — let user choose
+    local = []
+    try:
+        result = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            for line in result.stdout.strip().split("\n")[1:]:  # skip header
+                name = line.split()[0] if line else ""
+                if name:
+                    local.append(name)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
 
     console.print(
-        "\n[bold yellow]No local Ollama models found.[/bold yellow]\n"
-        "Select a model to install "
+        "\n[bold yellow]Select a model to use "
         "([bold]smollm2:135m[/bold] recommended — 270 MB, quick start):\n"
     )
-    model = pick_model_fzf() or pick_model_menu()
+
+    # Get list of installed models for the picker (via CLI)
+    local = []
+    try:
+        result = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            for line in result.stdout.strip().split("\n")[1:]:  # skip header
+                name = line.split()[0] if line else ""
+                if name:
+                    local.append(name)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+
+    model = pick_model_fzf(local) or pick_model_menu(local)
     if not model:
         console.print("[red]Cancelled.[/red]")
         sys.exit(1)
 
+    # Check if already installed
+    if model in local:
+        console.print(f"[green]✓[/green] {model} already installed\n")
+        return model
+
     console.print(f"\n[bold]Pulling {model}...[/bold]")
-    subprocess.run(["ollama", "pull", model], check=True)
+    result = subprocess.run(["ollama", "pull", model], capture_output=True, text=True)
+    if result.returncode != 0:
+        console.print(f"[red]Error pulling {model}:[/red]")
+        console.print(result.stderr.strip())
+        sys.exit(1)
+
+    # Update DB
+    db[model] = True
+    save_models_db(db)
     console.print(f"[green]✓[/green] {model} installed\n")
     return model
 
