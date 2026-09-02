@@ -116,12 +116,18 @@ def model_exists_on_disk(model: str) -> bool:
 
 def pick_model_fzf(local_models: list[str]) -> str | None:
     """Show fzf picker with translation models. Installed models first. Returns model tag or None."""
+    # Add any locally installed models that are not in TRANSLATION_MODELS
+    all_models = list(TRANSLATION_MODELS)
+    for m in local_models:
+        if not any(tag == m for tag, _, _ in TRANSLATION_MODELS):
+            all_models.append((m, "?", "Другая модель"))
+
     def sort_key(item):
         tag = item[0]
         installed = 0 if tag in local_models else 1
         return (installed, tag)
 
-    sorted_models = sorted(TRANSLATION_MODELS, key=sort_key)
+    sorted_models = sorted(all_models, key=sort_key)
     lines = "\n".join(
         f"{'✅' if tag in local_models else '☁️'} {tag}|{size}|{desc}"
         for tag, size, desc in sorted_models
@@ -158,12 +164,18 @@ def pick_model_fzf(local_models: list[str]) -> str | None:
 
 def pick_model_menu(local_models: list[str]) -> str | None:
     """Fallback numbered menu when fzf is not available. Installed models first."""
+    # Add any locally installed models that are not in TRANSLATION_MODELS
+    all_models = list(TRANSLATION_MODELS)
+    for m in local_models:
+        if not any(tag == m for tag, _, _ in TRANSLATION_MODELS):
+            all_models.append((m, "?", "Другая модель"))
+
     def sort_key(item):
         tag = item[0]
         installed = 0 if tag in local_models else 1
         return (installed, tag)
 
-    sorted_models = sorted(TRANSLATION_MODELS, key=sort_key)
+    sorted_models = sorted(all_models, key=sort_key)
     console.print("\n[bold yellow]Available translation models:[/bold yellow]\n")
     for i, (tag, size, desc) in enumerate(sorted_models, 1):
         emoji = "✅" if tag in local_models else "☁️"
