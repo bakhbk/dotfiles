@@ -528,7 +528,24 @@ netcheck() {
     else
         pub_ip=$(curl -s --max-time 2 --fail https://ifconfig.me 2>/dev/null || echo 'n/a')
     fi
-    echo "   🌐 Публичный IP: $pub_ip"
+    [ "$pub_ip" != "n/a" ] && echo "   🌐 Публичный IP: $pub_ip" || echo "   🌐 Публичный IP: не определяется"
+    
+    # HTTP проверка
+    local http_ok=false
+    echo ""
+    echo "🌍 HTTP доступ:"
+    for url in https://yandex.ru https://google.com; do
+        _code=$(curl -s --max-time 3 -o /dev/null -w "%{http_code}" "$url" 2>/dev/null)
+        case "$_code" in
+            200|301|302)
+                echo "   ✅ $url → $_code"
+                http_ok=true
+                ;;
+            *)
+                echo "   ❌ $url → ${_code:-timeout}"
+                ;;
+        esac
+    done
     
     # Роутер/шлюз
     local gw
@@ -550,15 +567,21 @@ netcheck() {
     
     # Внешние хосты
     echo ""
-    echo "🌐 Внешние серверы:"
+    echo "🌐 DNS и Ping:"
     
-    local count=0 passed=0 failed=0 dns_ok=false ping_ip=false
+    local count=0 passed=0 failed=0 dns_ok=false ping_ip=false dns_refused=false
     for t in "${targets[@]}"; do
         count=$((count + 1))
         echo "[$count/${#targets[@]}] $t..."
         
         if [[ "$t" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            if timeout $timeout ping -c 1 "$t" &>/dev/null; then
+            if timeout $timeout ping -c 1 "$t" 2>&1 | grep -q "Destination.*Unreachable"; then
+                echo "   ❌ Destination Unreachable — роутер не пушит наружу"
+                failed=$((failed + 1))
+            elif timeout $timeout ping -c 1 "$t" 2>&1 | grep -q "100% packet loss\|Request timeout"; then
+                echo "   ❌ FAIL (${timeout}s)"
+                failed=$((failed + 1))
+            elif timeout $timeout ping -c 1 "$t" &>/dev/null; then
                 echo "   ✅ OK"
                 passed=$((passed + 1))
                 ping_ip=true
@@ -568,7 +591,14 @@ netcheck() {
             fi
         else
             local ip=""
-            if timeout $timeout nslookup "$t" &>/dev/null; then
+            if timeout $timeout nslookup "$t" 2>&1 | grep -q "REFUSED"; then
+                dns_refused=true
+                echo "   ❌ DNS REFUSED — роутер отказывает"
+                failed=$((failed + 1))
+            elif timeout $timeout nslookup "$t" 2>&1 | grep -q "server can't find\|NXDOMAIN"; then
+                echo "   ❌ DNS FAIL (${timeout}s)"
+                failed=$((failed + 1))
+            elif timeout $timeout nslookup "$t" &>/dev/null; then
                 ip=$(nslookup "$t" 2>/dev/null | grep "Address:" | tail -1 | awk '{print $2}')
                 dns_ok=true
                 if timeout $timeout ping -c 1 "$t" &>/dev/null; then
@@ -588,8 +618,10 @@ netcheck() {
     # Итог
     echo ""
     echo "======================="
-    if [ $passed -eq $count ]; then
+    if [ $passed -eq $count ] && [ "$http_ok" = true ]; then
         echo "✅ интернет работает"
+    elif [ $dns_refused = true ] && [ $http_ok = false ]; then
+        echo "❌ Нет интернета — роутер не подключён к сети (проблема у провайдера)"
     elif [ $dns_ok = false ] && [ $ping_ip = true ]; then
         echo "⚠️  DNS не работает — проверь настройки DNS"
     elif [ $ping_ip = false ] && [ $dns_ok = true ]; then
