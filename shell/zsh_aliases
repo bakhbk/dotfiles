@@ -232,3 +232,4 @@ alias prep-fast='uv run ~/dotfiles/scripts/prep-agents/prep-agents.py --max-cont
 alias prep-code='uv run ~/dotfiles/scripts/prep-agents/prep-agents.py --max-context 16000'
 alias prep-deep='uv run ~/dotfiles/scripts/prep-agents/prep-agents.py --max-context 32000'
 alias prep-big='uv run ~/dotfiles/scripts/prep-agents/prep-agents.py --max-context 64000'
+alias prep-clean='uv run ~/dotfiles/scripts/prep-agents/prep-agents.py --cleanup'

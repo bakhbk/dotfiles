@@ -167,6 +167,7 @@ class SyncArgs:
     """Аргументы CLI — легко расширять."""
     max_context: int | None = None
     provider_filter: str | None = None
+    cleanup: bool = False  # удалять модели удалённых провайдеров
     verbose: bool = False  # по умолчанию quiet, -v включает логи
 
     @classmethod
@@ -176,12 +177,15 @@ class SyncArgs:
                             help="Принудительный максимум контекста (токены)")
         parser.add_argument("--provider", default=None,
                             help="Синхронизировать только указанного провайдера")
+        parser.add_argument("--cleanup", action="store_true",
+                            help="Удалить модели провайдеров, которых нет в providers.conf")
         parser.add_argument("-v", "--verbose", action="store_true",
                             help="Показывать все логи (по умолчанию только ошибки)")
         args = parser.parse_args()
         return cls(
             max_context=args.max_context,
             provider_filter=args.provider,
+            cleanup=args.cleanup,
             verbose=args.verbose,
         )
 
@@ -376,7 +380,7 @@ class ZedProviderAccessor:
 # ============================================================================
 class PiModelBuilder:
     def create(self, model_id: str, caps: dict, rd: dict | None, max_context: int | None = None) -> dict:
-        pi_ctx = clamp_context(rd.get('max_context_length') if rd else None, max_context) or 128000
+        pi_ctx = clamp_context(rd.get('max_context_length') if rd else 128000, max_context)
         input_types = ["text"]
         if caps.get("vision"):
             input_types.append("image")
@@ -403,7 +407,7 @@ class PiModelBuilder:
             existing["input"] = input_types
             needs_update = True
 
-        pi_ctx = clamp_context(rd.get('max_context_length') if rd else None, max_context) or 128000
+        pi_ctx = clamp_context(rd.get('max_context_length') if rd else 128000, max_context)
         if existing.get('contextWindow') != pi_ctx:
             existing['contextWindow'] = pi_ctx
             needs_update = True
@@ -431,7 +435,7 @@ class KiloModelBuilder:
 
 class OpenCodeModelBuilder:
     def create(self, model_id: str, caps: dict, rd: dict | None, max_context: int | None = None) -> dict:
-        oc_ctx = clamp_context(rd.get('max_context_length') if rd else None, max_context) or 128000
+        oc_ctx = clamp_context(rd.get('max_context_length') if rd else 128000, max_context)
         modalities = {
             "input": ["image", "text"] if caps.get("vision") else ["text"],
             "output": ["text"],
@@ -456,7 +460,7 @@ class OpenCodeModelBuilder:
             existing["modalities"] = modalities
             needs_update = True
 
-        oc_ctx = clamp_context(rd.get('max_context_length') if rd else None, max_context) or 128000
+        oc_ctx = clamp_context(rd.get('max_context_length') if rd else 128000, max_context)
         existing_limit = existing.get("limit", {})
         if (existing_limit.get("context") != oc_ctx) or (existing_limit.get("output") != oc_ctx // 2):
             existing["limit"] = {"context": oc_ctx, "output": oc_ctx // 2}
@@ -467,7 +471,7 @@ class OpenCodeModelBuilder:
 
 class ZedModelBuilder:
     def create(self, model_id: str, caps: dict, rd: dict | None, max_context: int | None = None) -> dict:
-        zed_max = clamp_context(rd.get('max_context_length') if rd else None, max_context) or 200000
+        zed_max = clamp_context(rd.get('max_context_length') if rd else 200000, max_context)
         return {
             "name": model_id,
             "display_name": model_id.split("/")[-1],
@@ -489,7 +493,7 @@ class ZedModelBuilder:
             existing["display_name"] = model_id.split("/")[-1]
             needs_update = True
 
-        zed_max = clamp_context(rd.get('max_context_length') if rd else None, max_context) or 200000
+        zed_max = clamp_context(rd.get('max_context_length') if rd else 200000, max_context)
         if existing.get('max_tokens') != zed_max:
             existing['max_tokens'] = zed_max
             needs_update = True
@@ -727,7 +731,7 @@ def sync_vscode(provider_name: str, cfg: dict, data: ProviderData,
 
         existing = next((m for m in target.get("models", []) if m.get("id") == model_id), None)
 
-        mcl = clamp_context(rd.get('max_context_length') if rd else None, ctx.max_context) or 128000
+        mcl = clamp_context(rd.get('max_context_length') if rd else 128000, ctx.max_context)
 
         if existing:
             needs_update = False
@@ -774,6 +778,101 @@ def sync_vscode(provider_name: str, cfg: dict, data: ProviderData,
 # ============================================================================
 # VS Code profiles sync (копирование конфига)
 # ============================================================================
+# ============================================================================
+# Cleanup — удаление моделей удалённых провайдеров
+# ============================================================================
+
+def cleanup_stale_models(active_providers: set[str]) -> tuple[int, int, int]:
+    """Удаляет модели провайдеров, которых нет в active_providers.
+    
+    Возвращает (added, updated, removed).
+    """
+    total_added = 0
+    total_updated = 0
+    total_removed = 0
+
+    # PI
+    pi_path = PI_MODELS
+    if pi_path.exists():
+        data = json.loads(pi_path.read_text(encoding="utf-8"))
+        providers = data.get("providers", {})
+        stale = [p for p in providers if p not in active_providers]
+        for p in stale:
+            logger.info("  pi: удаление провайдера %s (%d моделей)", p, len(providers[p].get("models", [])))
+            del providers[p]
+            total_removed += 1
+        if stale:
+            pi_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    # Kilo
+    kilo_path = KILO_CONFIG
+    if kilo_path.exists():
+        raw = kilo_path.read_text(encoding="utf-8")
+        cleaned = strip_jsonc_comments(raw)
+        data = json.loads(cleaned)
+        provider = data.get("provider", {})
+        stale = [p for p in provider if isinstance(provider[p], dict) and "models" in provider[p] and p not in active_providers]
+        for p in stale:
+            logger.info("  kilo: удаление провайдера %s", p)
+            del provider[p]
+            total_removed += 1
+        if stale:
+            tmp = kilo_path.with_suffix('.tmp')
+            tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            tmp.replace(kilo_path)
+
+    # OpenCode
+    oc_path = OPENCODE_CONFIG
+    if oc_path.exists():
+        raw = oc_path.read_text(encoding="utf-8")
+        cleaned = strip_jsonc_comments(raw)
+        data = json.loads(cleaned)
+        provider = data.get("provider", {})
+        stale = [p for p in provider if isinstance(provider[p], dict) and "models" in provider[p] and p not in active_providers]
+        for p in stale:
+            logger.info("  opencode: удаление провайдера %s", p)
+            del provider[p]
+            total_removed += 1
+        if stale:
+            tmp = oc_path.with_suffix('.tmp')
+            tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            tmp.replace(oc_path)
+
+    # Zed
+    zed_path = ZED_SETTINGS
+    if zed_path.exists():
+        data = json.loads(zed_path.read_text(encoding="utf-8"))
+        lm = data.get("language_models", {})
+        oai = lm.get("openai_compatible", {})
+        stale = [p for p in oai if "available_models" in oai[p] and p not in active_providers]
+        for p in stale:
+            logger.info("  zed: удаление провайдера %s", p)
+            del oai[p]
+            total_removed += 1
+        if stale:
+            tmp = zed_path.with_suffix('.tmp')
+            tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            tmp.replace(zed_path)
+
+    # VS Code — chatLanguageModels.json (list format)
+    vscode_path = CODE_CHAT_MODELS
+    if vscode_path.exists():
+        raw = vscode_path.read_text(encoding="utf-8")
+        cleaned = strip_jsonc_comments(raw)
+        data = json.loads(cleaned)
+        stale_ids = [m["id"] for m in data if isinstance(m, dict) and "providerId" in m and m["providerId"] not in active_providers]
+        for mid in stale_ids:
+            logger.info("  vscode: удаление модели %s", mid)
+            data = [m for m in data if not (isinstance(m, dict) and m.get("id") == mid)]
+            total_removed += 1
+        if stale_ids:
+            tmp = vscode_path.with_suffix('.tmp')
+            tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            tmp.replace(vscode_path)
+
+    return total_added, total_updated, total_removed
+
+
 def sync_vscode_profiles() -> int:
     """Копирует chatLanguageModels.json из основного конфига во все профили VS Code."""
     profiles_dir = CODE_USER_FOLDER / "profiles"
@@ -1051,6 +1150,16 @@ def main() -> None:
 
     logger.info("\nИтого: добавлено %d, обновлено %d, удалено %d моделей",
                 total_added, total_updated, total_removed)
+
+    # Cleanup — удаление удалённых провайдеров
+    if args.cleanup:
+        active_set = set(providers.keys())
+        logger.info("\nCleanup: удаление моделей провайдеров, которых нет в providers.conf")
+        ca, cu, cr = cleanup_stale_models(active_set)
+        total_added += ca
+        total_updated += cu
+        total_removed += cr
+        logger.info("Cleanup: добавлено %d, обновлено %d, удалено %d", ca, cu, cr)
 
     # Копируем chatLanguageModels во все профили VS Code
     copied = sync_vscode_profiles()
