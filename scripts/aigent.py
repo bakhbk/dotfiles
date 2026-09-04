@@ -4,7 +4,7 @@
 # dependencies = ["requests>=2.31.0"]
 # ///
 
-import json, sys, subprocess, os, uuid
+import base64, json, re, sys, subprocess, os, uuid
 import requests
 
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:8080/v1")
@@ -73,12 +73,51 @@ def call_llm(messages):
     tool_calls = msg.get("tool_calls") or []
     return content, tool_calls
 
+IMAGE_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif"}
+IMAGE_RE = re.compile(r"[\w./~-]+?\.(?:png|jpe?g|gif)", re.IGNORECASE)
+
+def load_image(path: str) -> str | None:
+    """Возвращает data-URI картинки по пути или None, если файл не прочитать."""
+    try:
+        with open(path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+    except OSError as e:
+        print(f"⚠️  Failed to load image {path}: {e}")
+        return None
+    mime = IMAGE_MIME.get(os.path.splitext(path)[1].lower(), "image/png")
+    return f"data:{mime};base64,{b64}"
+
+def build_user_content(message: str) -> list | str:
+    """Извлекает пути к картинкам из промпта; возвращает multimodal content, иначе str."""
+    seen, paths = set(), []
+    for raw in IMAGE_RE.findall(message):
+        p = os.path.expanduser(raw)
+        if os.path.exists(p) and p not in seen:
+            seen.add(p)
+            paths.append((raw, p))
+    if not paths:
+        return message
+    text = message
+    images = []
+    for raw, p in paths:
+        text = text.replace(raw, f"[image: {p}]", 1)
+        url = load_image(p)
+        if url:
+            images.append({"type": "image_url", "image_url": {"url": url}})
+    return [{"type": "text", "text": text.strip()}] + images
+
 def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> None:
     print(f"🔗 {LLM_BASE_URL}")
     print(f"🤖 Model: {LLM_MODEL}")
+    
+    # Проверяем есть ли картинки в промпте
+    user_content = build_user_content(user_message)
+    if isinstance(user_content, list):
+        print(f"🖼️  Detected images in prompt")
+    
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_message}
+        {"role": "user", "content": user_content}
     ]
     for turn in range(1, MAX_TURNS + 1):
         print(f"\n{'='*60}\n🔄 Turn {turn}\n{'='*60}")
