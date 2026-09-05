@@ -37,12 +37,13 @@ import requests
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:8080/v1")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "none")
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen")
+LLM_THINKING = os.getenv("LLM_THINKING", "on")  # on (default) | off — режим рассуждений
 LLM_HEADERS = {"Content-Type": "application/json",
                "Authorization": f"Bearer {LLM_API_KEY}"}
 
 MAX_TURNS = 1000
 MAX_CONTINUES = 3                # сколько раз «дописывать» ответ при finish=length
-MAX_TOKENS = 16_384              # бюджет вывода за один вызов (reasoning-моделям нужно на think+ответ)
+MAX_TOKENS = int(os.getenv("AIGENT_MAX_TOKENS", "16384"))  # бюджет вывода за вызов (think+ответ); поднять, если «may be incomplete»
 BASH_TIMEOUT = 120
 LLM_TIMEOUT = (10, 300)          # (connect, read)
 RETRY_DELAYS = (3, 5, 10)        # 3 retry
@@ -169,12 +170,19 @@ class LLMError(RuntimeError):
 
 
 def call_llm(messages):
-    """POST /chat/completions. Возвращает (content, tool_calls, finish_reason).
+    """POST /chat/completions. Возвращает (content, tool_calls, finish_reason, reasoning).
 
     Retry x3 (3/5/10s) на сетевые ошибки, 429, 5xx. 4xx — сразу LLMError.
     """
     payload = {"model": LLM_MODEL, "messages": messages, "tools": LLM_TOOLS,
                "tool_choice": "auto", "temperature": 0.1, "max_tokens": MAX_TOKENS}
+    if LLM_THINKING == "off":
+        # «дробовик»: все известные диалекты off (как в doit.sh) — провайдеры
+        # понимают только свои флаги, остальные игнорируют.
+        payload.update(think=False, reasoning=False, enable_thinking=False,
+                       reasoning_effort="none",
+                       chat_template_kwargs={"enable_thinking": False, "thinking": False},
+                       reasoning_config={"enabled": False})
     last_err = ""
     for attempt in range(1 + len(RETRY_DELAYS)):
         if attempt:
@@ -195,7 +203,8 @@ def call_llm(messages):
             msg = choice["message"]
             return ((msg.get("content") or "").strip(),
                     msg.get("tool_calls") or [],
-                    choice.get("finish_reason"))
+                    choice.get("finish_reason"),
+                    msg.get("reasoning_content") or "")
         except LLMError as e:
             last_err = str(e)
             if not e.retryable:
@@ -332,7 +341,11 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
     try:
         for turn in range(1, MAX_TURNS + 1):
             status(f"🔄 turn {turn}")
-            content, tool_calls, finish_reason = call_llm(messages)
+            content, tool_calls, finish_reason, reasoning = call_llm(messages)
+            if reasoning:
+                log(f"turn {turn} 💭 {len(reasoning)}c\n{reasoning}")
+                if VERBOSE:
+                    print(f"\n💭 …{reasoning[-500:]}")
             log(f"turn {turn}: content={len(content)}c tools={len(tool_calls)} "
                 f"finish={finish_reason}")
             if finish_reason == "length":
@@ -343,11 +356,14 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                 while finish_reason == "length" and cont < MAX_CONTINUES:
                     cont += 1
                     log(f"turn {turn}: finish=length → continuation {cont}/{MAX_CONTINUES}")
-                    messages.append({"role": "assistant", "content": content})
+                    am = {"role": "assistant", "content": content}
+                    if reasoning:
+                        am["reasoning_content"] = reasoning
+                    messages.append(am)
                     messages.append({"role": "user",
                                      "content": "Продолжи с места, где остановился. "
                                                 "Не повторяй уже написанное."})
-                    content, tool_calls, finish_reason = call_llm(messages)
+                    content, tool_calls, finish_reason, reasoning = call_llm(messages)
                     log(f"turn {turn}: continuation {cont}: content={len(content)}c "
                         f"finish={finish_reason}")
                     full = (full or "") + (content or "")
