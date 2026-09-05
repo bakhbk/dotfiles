@@ -41,6 +41,8 @@ LLM_HEADERS = {"Content-Type": "application/json",
                "Authorization": f"Bearer {LLM_API_KEY}"}
 
 MAX_TURNS = 1000
+MAX_CONTINUES = 3                # сколько раз «дописывать» ответ при finish=length
+MAX_TOKENS = 16_384              # бюджет вывода за один вызов (reasoning-моделям нужно на think+ответ)
 BASH_TIMEOUT = 120
 LLM_TIMEOUT = (10, 300)          # (connect, read)
 RETRY_DELAYS = (3, 5, 10)        # 3 retry
@@ -172,7 +174,7 @@ def call_llm(messages):
     Retry x3 (3/5/10s) на сетевые ошибки, 429, 5xx. 4xx — сразу LLMError.
     """
     payload = {"model": LLM_MODEL, "messages": messages, "tools": LLM_TOOLS,
-               "tool_choice": "auto", "temperature": 0.1, "max_tokens": 4096}
+               "tool_choice": "auto", "temperature": 0.1, "max_tokens": MAX_TOKENS}
     last_err = ""
     for attempt in range(1 + len(RETRY_DELAYS)):
         if attempt:
@@ -331,12 +333,29 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
         for turn in range(1, MAX_TURNS + 1):
             status(f"🔄 turn {turn}")
             content, tool_calls, finish_reason = call_llm(messages)
-            if content:
-                last_content = content
             log(f"turn {turn}: content={len(content)}c tools={len(tool_calls)} "
                 f"finish={finish_reason}")
             if finish_reason == "length":
-                status("⚠️ output truncated (max_tokens) — ответ может быть неполным")
+                # Бюджет выгорел (типично для reasoning-моделей: think съел весь max_tokens).
+                # Дожимаем: просим продолжить, пока модель не закончит сама.
+                full = content
+                cont = 0
+                while finish_reason == "length" and cont < MAX_CONTINUES:
+                    cont += 1
+                    log(f"turn {turn}: finish=length → continuation {cont}/{MAX_CONTINUES}")
+                    messages.append({"role": "assistant", "content": content})
+                    messages.append({"role": "user",
+                                     "content": "Продолжи с места, где остановился. "
+                                                "Не повторяй уже написанное."})
+                    content, tool_calls, finish_reason = call_llm(messages)
+                    log(f"turn {turn}: continuation {cont}: content={len(content)}c "
+                        f"finish={finish_reason}")
+                    full = (full or "") + (content or "")
+                content = full
+                if finish_reason == "length":
+                    log("⚠️ answer may be incomplete (still truncated after continuations)")
+            if content:
+                last_content = content
             if VERBOSE and content:
                 print(f"\n🤖 {content}")
 
