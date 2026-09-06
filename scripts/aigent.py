@@ -46,6 +46,7 @@ MAX_CONTINUES = 3                # сколько раз «дописывать�
 MAX_TOKENS = int(os.getenv("AIGENT_MAX_TOKENS", "16384"))  # бюджет вывода за вызов (think+ответ); поднять, если «may be incomplete»
 BASH_TIMEOUT = 120
 LLM_TIMEOUT = (10, 300)          # (connect, read)
+STREAM_STALL = 180               # сек без полезных токенов в стриме = генератор умер
 RETRY_DELAYS = (3, 5, 10)        # 3 retry
 MAX_TOOL_RESULT = 16_000         # обрезка tool-результата при отправке в LLM
 
@@ -169,13 +170,76 @@ class LLMError(RuntimeError):
         self.retryable = retryable
 
 
+def _consume_stream(resp):
+    """Собирает (content, tool_calls, finish_reason, reasoning) из SSE-чанков.
+
+    Пинги релеи не считаются: если STREAM_STALL секунд нет полезных токенов —
+    генератор мертв (relay может держать сокет живым вечно), retryable-ошибка.
+    """
+    content, reasoning, finish = "", "", None
+    tcs = {}  # index -> tool_call
+    last_token = time.monotonic()
+    with resp:
+        for raw in resp.iter_lines():
+            if time.monotonic() - last_token > STREAM_STALL:
+                raise LLMError(f"stream stalled: no tokens for {STREAM_STALL}s",
+                               retryable=True)
+            if not raw:
+                continue
+            line = raw.decode() if isinstance(raw, bytes) else raw
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data)
+            except ValueError:
+                continue
+            if not chunk.get("choices"):
+                continue
+            ch = chunk["choices"][0]
+            delta = ch.get("delta") or {}
+            meaningful = False
+            if delta.get("reasoning_content"):
+                reasoning += delta["reasoning_content"]
+                meaningful = True
+            if delta.get("content"):
+                content += delta["content"]
+                meaningful = True
+            for d in delta.get("tool_calls") or []:
+                tc = tcs.setdefault(d.get("index", 0),
+                                    {"id": "", "type": "function",
+                                     "function": {"name": "", "arguments": ""}})
+                if d.get("id"):
+                    tc["id"] = d["id"]
+                fn = d.get("function") or {}
+                if fn.get("name"):
+                    tc["function"]["name"] = fn["name"]
+                if fn.get("arguments"):
+                    tc["function"]["arguments"] += fn["arguments"]
+                    meaningful = True
+            if ch.get("finish_reason"):
+                finish = ch["finish_reason"]
+                meaningful = True
+            if meaningful:
+                last_token = time.monotonic()
+    return (content.strip(),
+            [tcs[i] for i in sorted(tcs)],
+            finish,
+            reasoning)
+
+
 def call_llm(messages):
-    """POST /chat/completions. Возвращает (content, tool_calls, finish_reason, reasoning).
+    """POST /chat/completions (stream). Возвращает (content, tool_calls, finish_reason, reasoning).
 
     Retry x3 (3/5/10s) на сетевые ошибки, 429, 5xx. 4xx — сразу LLMError.
+    Stream: чанки идут по мере генерации → read-timeout считает паузу между
+    чанками, «медленно думает» ≠ «умер» (нет ложных retry).
     """
     payload = {"model": LLM_MODEL, "messages": messages, "tools": LLM_TOOLS,
-               "tool_choice": "auto", "temperature": 0.1, "max_tokens": MAX_TOKENS}
+               "tool_choice": "auto", "temperature": 0.1, "max_tokens": MAX_TOKENS,
+               "stream": True}
     if LLM_THINKING == "off":
         # «дробовик»: все известные диалекты off (как в doit.sh) — провайдеры
         # понимают только свои флаги, остальные игнорируют.
@@ -188,29 +252,31 @@ def call_llm(messages):
         if attempt:
             log(f"⚠️ retry {attempt}/{len(RETRY_DELAYS)} in {RETRY_DELAYS[attempt - 1]}s")
             time.sleep(RETRY_DELAYS[attempt - 1])
+        resp = None
         try:
             with heartbeat("LLM call"):
                 resp = requests.post(f"{LLM_BASE_URL}/chat/completions",
                                      json=payload, headers=LLM_HEADERS,
-                                     timeout=LLM_TIMEOUT)
-            if resp.status_code == 429 or resp.status_code >= 500:
-                raise LLMError(f"HTTP {resp.status_code}: {resp.text[:200]}",
-                               retryable=True)
-            if resp.status_code >= 400:
-                raise LLMError(f"HTTP {resp.status_code}: {resp.text[:300]}")
-            data = resp.json()
-            choice = data["choices"][0]
-            msg = choice["message"]
-            return ((msg.get("content") or "").strip(),
-                    msg.get("tool_calls") or [],
-                    choice.get("finish_reason"),
-                    msg.get("reasoning_content") or "")
+                                     timeout=LLM_TIMEOUT, stream=True)
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    raise LLMError(f"HTTP {resp.status_code}: {resp.text[:200]}",
+                                   retryable=True)
+                if resp.status_code >= 400:
+                    raise LLMError(f"HTTP {resp.status_code}: {resp.text[:300]}")
+                return _consume_stream(resp)
         except LLMError as e:
             last_err = str(e)
             if not e.retryable:
                 raise
         except (requests.RequestException, ValueError, KeyError) as e:
             last_err = f"{type(e).__name__}: {e}"
+        finally:
+            if resp is not None:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
+        log(f"⚠️ attempt {attempt + 1} failed: {last_err}")
     raise LLMError(f"LLM request failed after {1 + len(RETRY_DELAYS)} attempts: {last_err}")
 
 
