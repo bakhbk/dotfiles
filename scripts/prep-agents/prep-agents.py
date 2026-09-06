@@ -575,6 +575,16 @@ def sync_provider(schema: Schema, provider_name: str, cfg: dict,
         caps = ctx.capabilities.get(model_id, CAPABILITIES_DEFAULTS)
         rd = resolve_model_details(model_id, data)
 
+        # YAML — только как fallback, если API не вернул контекст
+        if rd is None:
+            yaml_ctx = caps.get("max_context_length")
+            if yaml_ctx is not None:
+                rd = {"max_context_length": yaml_ctx}
+        elif rd.get("max_context_length") is None:
+            yaml_ctx = caps.get("max_context_length")
+            if yaml_ctx is not None:
+                rd = {**rd, "max_context_length": yaml_ctx}
+
         # Override capabilities с LM Studio extended API данных
         if rd:
             if rd.get('vision') is not None:
@@ -722,6 +732,16 @@ def sync_vscode(provider_name: str, cfg: dict, data: ProviderData,
 
         caps = ctx.capabilities.get(model_id, CAPABILITIES_DEFAULTS)
         rd = resolve_model_details(model_id, data)
+
+        # YAML — только как fallback, если API не вернул контекст
+        if rd is None:
+            yaml_ctx = caps.get("max_context_length")
+            if yaml_ctx is not None:
+                rd = {"max_context_length": yaml_ctx}
+        elif rd.get("max_context_length") is None:
+            yaml_ctx = caps.get("max_context_length")
+            if yaml_ctx is not None:
+                rd = {**rd, "max_context_length": yaml_ctx}
 
         if rd:
             if rd.get('vision') is not None:
@@ -1053,8 +1073,14 @@ def load_capabilities(path: Path = MODEL_CAPABILITIES_YAML) -> dict[str, dict]:
         field_match = re.match(r"^(\s+)([^:\s][^:]*):\s*(.+)$", line)
         if field_match and current_model is not None:
             key = field_match.group(2).strip()
-            value = field_match.group(3).strip().lower()
-            if value in {"true", "yes", "y", "1"}:
+            value_raw = field_match.group(3).strip()
+            value = value_raw.lower()
+            if key == "max_context_length":
+                try:
+                    capabilities[current_model][key] = int(value_raw)
+                except ValueError:
+                    pass
+            elif value in {"true", "yes", "y", "1"}:
                 capabilities[current_model][key] = True
             elif value in {"false", "no", "n", "0"}:
                 capabilities[current_model][key] = False
