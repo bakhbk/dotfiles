@@ -380,13 +380,21 @@ class ZedProviderAccessor:
 # ============================================================================
 class PiModelBuilder:
     def create(self, model_id: str, caps: dict, rd: dict | None, max_context: int | None = None) -> dict:
+        # Определяем reasoning: из extended API > по названию > по умолчанию True
+        if rd and "reasoning" in rd:
+            is_reasoning = bool(rd["reasoning"])
+        elif _is_reasoning_model(model_id):
+            is_reasoning = True
+        else:
+            is_reasoning = True  # по умолчанию включён для всех моделей
+
         pi_ctx = clamp_context(rd.get('max_context_length') if rd else 128000, max_context)
         input_types = ["text"]
         if caps.get("vision"):
             input_types.append("image")
         return {
             "id": model_id,
-            "reasoning": _is_reasoning_model(model_id),
+            "reasoning": is_reasoning,
             "toolCalling": True,
             "input": input_types,
             "contextWindow": pi_ctx,
@@ -395,7 +403,13 @@ class PiModelBuilder:
 
     def update(self, existing: dict, model_id: str, caps: dict, rd: dict | None, max_context: int | None = None) -> bool:
         needs_update = False
-        want_reasoning = _is_reasoning_model(model_id)
+        # Определяем reasoning: из extended API > по названию > по умолчанию True
+        if rd and "reasoning" in rd:
+            want_reasoning = bool(rd["reasoning"])
+        elif _is_reasoning_model(model_id):
+            want_reasoning = True
+        else:
+            want_reasoning = True  # по умолчанию включён для всех моделей
         if existing.get("reasoning") != want_reasoning:
             existing["reasoning"] = want_reasoning
             needs_update = True
@@ -1014,9 +1028,14 @@ def _parse_lmstudio_details(response_data: dict) -> tuple[dict, dict, dict]:
         caps = m.get("capabilities", {})
         quantization = m.get("quantization", {})
 
+        # reasoning: True если есть capabilities.reasoning (даже null — значит поддерживается)
+        raw_reasoning = caps.get("reasoning")
+        reasoning_supported = raw_reasoning is not None
+
         rd = {
             "vision": caps.get("vision"),
             "tools": caps.get("trained_for_tool_use", caps.get("tool_use")),
+            "reasoning": reasoning_supported,
             "architecture": m.get("architecture", ""),
             "quantization": quantization.get("name") if isinstance(quantization, dict) else str(quantization),
             "size_bytes": m.get("size_bytes"),
