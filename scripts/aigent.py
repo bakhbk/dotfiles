@@ -5,8 +5,11 @@
 # ///
 """LLM coding agent v2.
 
-- stdout: короткая статус-строка на действие + финальный ответ (без -v).
-- -v: полный вывод (текст модели, аргументы, preview результатов, heartbeat-строки).
+- stdout без -v: строки запуска (📄 log-файл, 🔗 provider/url/model) +
+  финальный ответ + завершающие статусы (✅ done, 💾 saved, ⚠️/💥 ошибки).
+  Промежуточный шум (turn, tool-линии) — только в лог-файл.
+- -v: полный вывод (log-путь, endpoint, turn-строки, текст модели, аргументы,
+  preview результатов, heartbeat-строки).
 - Всё действие асинхронно пишется в $AIGENT_DIR/<ts>-<id>.log (по умолчанию
   ~/.local/state/aigent), путь печатается в stdout на старте.
 - Ошибки API: retry x3 (паузы 3/5/10s) на network/429/5xx, 4xx — сразу ошибка.
@@ -38,6 +41,7 @@ LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:8080/v1")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "none")
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen")
 LLM_THINKING = os.getenv("LLM_THINKING", "on")  # on (default) | off — режим рассуждений
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "local")  # человекочитаемое имя бэкенда для 📄/🔗 строк
 LLM_HEADERS = {"Content-Type": "application/json",
                "Authorization": f"Bearer {LLM_API_KEY}"}
 
@@ -97,7 +101,7 @@ def start_log() -> None:
     open(LOG_FILE, "a").close()  # создать файл
     _log_thread = threading.Thread(target=_log_writer, daemon=True)
     _log_thread.start()
-    print(f"📄 log: {LOG_FILE}", flush=True)
+    status(f"📄 log: {LOG_FILE}")  # важно: куда пишется лог — видно всегда
 
 
 def stop_log() -> None:
@@ -391,13 +395,13 @@ def save_result(content: str, reason: str = "") -> str:
 # --------------------------------------------------------------------------
 
 def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
-    status(f"🔗 {LLM_BASE_URL} model={LLM_MODEL}" + (" [verbose]" if VERBOSE else ""))
+    status(f"🔗 provider={LLM_PROVIDER} {LLM_BASE_URL} model={LLM_MODEL}")
     log(f"prompt: {user_message}")
 
     user_content = build_user_content(user_message)
     if isinstance(user_content, list):
         n = sum(1 for c in user_content if c.get("type") == "image_url")
-        status(f"🖼️  {n} image(s) attached")
+        log(f"🖼️  {n} image(s) attached")
 
     messages = [{"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content}]
@@ -406,7 +410,7 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
     turn = 0
     try:
         for turn in range(1, MAX_TURNS + 1):
-            status(f"🔄 turn {turn}")
+            log(f"🔄 turn {turn}")
             content, tool_calls, finish_reason, reasoning = call_llm(messages)
             if reasoning:
                 log(f"turn {turn} 💭 {len(reasoning)}c\n{reasoning}")
@@ -455,11 +459,8 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                 fn = tc["function"]["name"]
                 args = json.loads(tc["function"]["arguments"])
                 arg_s = json.dumps(args, ensure_ascii=False)
-                if VERBOSE:
-                    print(f"🔧 {fn}({arg_s})")
-                else:
-                    status(f"🔧 {fn} {' '.join(arg_s.split())[:60]}")
-                log(f"turn {turn} → {fn}({arg_s})")
+                # в stdout — только при -v (полные аргументы), иначе — в файл
+                log(f"🔧 {fn}({arg_s})")
                 result = call_tool(fn, args)
                 log(f"turn {turn} ← {fn} [{len(result)}c]\n{result}")
                 if VERBOSE:
