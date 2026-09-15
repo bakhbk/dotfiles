@@ -25,20 +25,6 @@ setopt HIST_IGNORE_SPACE
 # Expand PATH
 typeset -U path
 
-# Load scripts
-source ~/.dotfiles/zsh_aliases
-source ~/.dotfiles/zsh_tools
-source ~/.dotfiles/zshenv
-source ~/.dotfiles/create_tmux_session.sh
-source ~/.dotfiles/commit.sh
-source ~/.dotfiles/fvm_tools.sh
-source ~/.dotfiles/ollama_fzf.sh
-source ~/.dotfiles/clean.sh
-if [ -f ~/work/.zshrc ]; then
-  source ~/work/.zshrc
-fi
-
-
 path=()
 path+=(~/.local/bin)
 
@@ -57,6 +43,19 @@ path+=(/usr/bin)
 path+=(/bin)
 path+=(/usr/sbin)
 path+=(/sbin)
+
+# Load scripts
+source ~/.dotfiles/zsh_aliases
+source ~/.dotfiles/zsh_tools
+source ~/.dotfiles/zshenv
+source ~/.dotfiles/create_tmux_session.sh
+source ~/.dotfiles/commit.sh
+source ~/.dotfiles/fvm_tools.sh
+source ~/.dotfiles/ollama_fzf.sh
+source ~/.dotfiles/clean.sh
+if [ -f ~/work/.zshrc ]; then
+  source ~/work/.zshrc
+fi
 
 # Tramp client (Emacs) sets TERM to dumb.
 # It doesn't expect anything clever or beautiful if cmdline prompt.

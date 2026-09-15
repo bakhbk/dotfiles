@@ -23,7 +23,7 @@ else
 fi
 
 # Список пакетов для установки/удаления
-PACKAGES=("zsh" "bat" "shellcheck" "btop" "coreutils" "tmux" "neovim" "zsh-syntax-highlighting")
+PACKAGES=("zsh" "bat" "shellcheck" "btop" "coreutils" "tmux" "neovim" "zsh-syntax-highlighting" "glow" "mdless")
 
 # Специальные пакеты для Linux
 if [[ "$OS" == "Linux" ]]; then

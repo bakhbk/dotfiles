@@ -5,6 +5,13 @@
 
 set -euxo pipefail
 
+# Запуск bootstrap с подтверждением в начале
+read -p "Запустить ./scripts/bootstrap.sh --install? [y/N]: " confirm
+RUN_BOOTSTRAP=false
+if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
+  RUN_BOOTSTRAP=true
+fi
+
 # Extracted clipboard helper installer
 ./installers/install_clipboard_helpers.sh || true
 
@@ -48,5 +55,9 @@ fi
 
 ./installers/install-oh-my-zsh.sh
 ./installers/install_fzf.sh
+
+if $RUN_BOOTSTRAP; then
+  ./scripts/bootstrap.sh --install
+fi
 
 exit 0

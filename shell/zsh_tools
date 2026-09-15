@@ -481,21 +481,38 @@ krbot() {
 
 # Select a file via fzf (preview: first 75 lines, truncated to 250 chars), print its path,
 # and copy its CONTENTS to the system clipboard (pbcopy/wl-copy/xclip).
-# Usage: fs [dir-or-glob]   (default: ~/.agents/prompts)
+# Usage: fs [-e] [dir-or-glob]   (default: ~/.agents/prompts)
+#   -e  : open selected file in $EDITOR instead of copying to clipboard
 fs() {
-    local dir="${1:-$HOME/.agents/prompts}"
+    local edit_mode=false
+    local dir="$HOME/.agents/prompts"
+    while getopts ":e" opt; do
+        case $opt in
+            e) edit_mode=true ;;
+            *) echo "Usage: fs [-e] [dir-or-glob]"; return 1 ;;
+        esac
+    done
+    shift $((OPTIND - 1))
+    [ $# -gt 0 ] && dir="$1"
+
     local f
     f=$(find "$dir" -maxdepth 1 -type f | fzf --preview-window=wrap --preview 'head -75 {} | cut -c1-250') || return
     [ -z "$f" ] && return
     echo "$f"
-    if command -v pbcopy >/dev/null 2>&1; then
-        cat "$f" | pbcopy
-    elif command -v wl-copy >/dev/null 2>&1; then
-        cat "$f" | wl-copy
+
+    if $edit_mode; then
+        local editor="${EDITOR:-nvim}"
+        $editor "$f"
     else
-        cat "$f" | xclip -selection clipboard
+        if command -v pbcopy >/dev/null 2>&1; then
+            cat "$f" | pbcopy
+        elif command -v wl-copy >/dev/null 2>&1; then
+            cat "$f" | wl-copy
+        else
+            cat "$f" | xclip -selection clipboard
+        fi
+        echo "✓ contents copied to clipboard"
     fi
-    echo "✓ contents copied to clipboard"
 }
 
 
