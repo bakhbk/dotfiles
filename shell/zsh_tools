@@ -691,6 +691,18 @@ gar() {
         echo "  -r, --run \"task\" Render and pass directly to pi with task"
         echo "  -h, --help      Show this help message"
         echo ""
+        echo 'Config: ~/.config/agent-runner/config.json'
+        echo '  {'
+        echo '    "agents": {'
+        echo '      "<name>": {'
+        echo '        "invocation": "...",'
+        echo '        # optional:'
+        echo '        "system_prompt_flag": "...",'
+        echo '        "prompt_prefix": "..."'
+        echo '      }'
+        echo '    }'
+        echo '  }'
+        echo ''
         echo "Default: render and copy to clipboard"
         return 0
     fi
@@ -712,7 +724,7 @@ gar() {
     # Read config values
     local invocation system_prompt_flag prompt_prefix
     invocation=$(jq -r ".agents[\"$agent\"].invocation" "$config_file")
-    system_prompt_flag=$(jq -r ".agents[\"$agent\"].system_prompt_flag" "$config_file")
+    system_prompt_flag=$(jq -r ".agents[\"$agent\"].system_prompt_flag // empty" "$config_file")
     prompt_prefix=$(jq -r ".agents[\"$agent\"].prompt_prefix" "$config_file")
 
     # Generate UUID once per invocation
@@ -727,8 +739,20 @@ gar() {
 
     # Render SKILL.md template using python3
     local rendered
-    rendered=$(python3 -c "
-import sys, json
+    if [ -z "$system_prompt_flag" ]; then
+        # No system prompt flag — remove System Prompt Control section
+        rendered=$(python3 -c "
+import re
+template = open('$HOME/.agents/skills/agent-runner/SKILL.md').read()
+template = re.sub(r'## System Prompt Control\n.*?(?=## Rules)', '', template, flags=re.DOTALL)
+template = template.replace('{{AGENT_NAME}}', '$agent')
+template = template.replace('{{INVOCATION}}', '''$invocation''')
+template = template.replace('{{PROMPT_PREFIX}}', '$prompt_prefix')
+template = template.replace('{{SESSION_UUID}}', '$uuid')
+print(template, end='')
+")
+    else
+        rendered=$(python3 -c "
 template = open('$HOME/.agents/skills/agent-runner/SKILL.md').read()
 template = template.replace('{{AGENT_NAME}}', '$agent')
 template = template.replace('{{INVOCATION}}', '''$invocation''')
@@ -737,6 +761,7 @@ template = template.replace('{{PROMPT_PREFIX}}', '$prompt_prefix')
 template = template.replace('{{SESSION_UUID}}', '$uuid')
 print(template, end='')
 ")
+    fi
 
     if $run_mode; then
         # --run: create temp file and pass to pi
