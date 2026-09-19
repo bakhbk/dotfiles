@@ -16,11 +16,32 @@ __pick_agent() {
         return 1
     fi
 
+    # Check required tools before fzf
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "❌ jq is required but not found" >&2
+        return 1
+    fi
+
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "❌ fzf is required but not found" >&2
+        return 1
+    fi
+
     local agent
     agent=$(jq -r '.agents | keys[]' "$_config_file" 2>/dev/null | \
-            fzf --preview-window=wrap --preview "jq '.agents[\"{}\"]' $_config_file" 2>/dev/null) || return
+            fzf --preview-window=wrap --preview "jq '.agents[\"{}\"]' $_config_file" 2>/dev/null)
 
-    [ -z "$agent" ] && return 0
+    # Check fzf result (was empty or cancelled)
+    if [ -z "$agent" ]; then
+        local agent_count
+        agent_count=$(jq '.agents | keys | length' "$_config_file" 2>/dev/null)
+        if [ "${agent_count:-0}" -eq 0 ]; then
+            echo "❌ No agents found in config: $_config_file" >&2
+        else
+            echo "❌ No agent selected (cancelled or fzf failed)" >&2
+        fi
+        return 1
+    fi
     echo "$agent"
 }
 
@@ -41,15 +62,45 @@ __render_skill_md() {
 
     local invocation system_prompt_flag prompt_prefix uuid
     invocation=$(jq -r ".agents[\"$agent\"].invocation" "$config_file")
+    if [ "$invocation" = "null" ]; then
+        echo "❌ Agent not found in config: $agent" >&2
+        return 1
+    fi
     system_prompt_flag=$(jq -r ".agents[\"$agent\"].system_prompt_flag // empty" "$config_file")
     prompt_prefix=$(jq -r ".agents[\"$agent\"].prompt_prefix" "$config_file")
-    uuid="${force_uuid:-$(uuidgen | cut -c1-8)}"
+
+    # UUID fallback: uuidgen → date → error
+    if [ -z "$force_uuid" ]; then
+        if command -v uuidgen >/dev/null 2>&1; then
+            uuid=$(uuidgen | cut -c1-8)
+        elif command -v date >/dev/null 2>&1; then
+            # Fallback: use epoch seconds as pseudo-unique ID
+            uuid=$(date +%s | cut -c1-8)
+        else
+            echo "❌ Cannot generate session ID (no uuidgen or date)" >&2
+            return 1
+        fi
+    else
+        uuid="$force_uuid"
+    fi
+
+    # Validate uuid is not empty (protects against data corruption)
+    if [ -z "$uuid" ]; then
+        echo "❌ Failed to generate a valid UUID" >&2
+        return 1
+    fi
 
     # Auto-create session directory
     mkdir -p "$HOME/.cache/agent-runner/$uuid" 2>/dev/null
 
     # Clean old prompt directories (>7 days)
     find "$HOME/.cache/agent-runner" -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + 2>/dev/null
+
+    # Validate template file exists before calling python3
+    if [ ! -f "$_skill_template" ]; then
+        echo "❌ Skill template not found: $_skill_template" >&2
+        return 1
+    fi
 
     if [ -z "$system_prompt_flag" ]; then
         python3 -c "
@@ -159,6 +210,10 @@ gar() {
     printf '%s\n' "$rendered" > "$tmp_file"
 
     if $run_mode; then
+        if ! command -v pi >/dev/null 2>&1; then
+            echo "❌ 'pi' command not found — run mode requires pi" >&2
+            return 1
+        fi
         echo "🚀 Running agent $agent with task: $task" >&2
         pi --skill "$tmp_file" -p "$task"
         rm -f "$tmp_file"
@@ -166,17 +221,26 @@ gar() {
     elif $edit_mode; then
         local editor="${EDITOR:-nvim}"
         $editor "$tmp_file"
-        __copy_to_clipboard "$tmp_file"
+        if __copy_to_clipboard "$tmp_file"; then
+            echo "✓ Rendered SKILL.md for $agent copied to clipboard" >&2
+        else
+            echo "⚠️  Copied to editor, but clipboard tool unavailable" >&2
+        fi
         rm -f "$tmp_file"
-        echo "✓ Rendered SKILL.md for $agent copied to clipboard" >&2
 
     elif $dry_run_mode; then
         cat "$tmp_file"
 
     else
         # default: copy to clipboard
-        __copy_to_clipboard "$tmp_file"
-        echo "✓ Rendered SKILL.md for $agent copied to clipboard" >&2
+        if __copy_to_clipboard "$tmp_file"; then
+            echo "✓ Rendered SKILL.md for $agent copied to clipboard" >&2
+        else
+            echo "⚠️  No clipboard tool available (pbcopy/wl-copy/xclip missing)" >&2
+            # Fallback: print to stdout as last resort
+            cat "$tmp_file"
+        fi
+        rm -f "$tmp_file"
     fi
 
     rm -f "$tmp_file"
@@ -226,7 +290,21 @@ load-skill() {
 
     # Generate UUID for session dir (shared between gar and load-skill)
     local uuid
-    uuid=$(uuidgen | cut -c1-8)
+    if command -v uuidgen >/dev/null 2>&1; then
+        uuid=$(uuidgen | cut -c1-8)
+    elif command -v date >/dev/null 2>&1; then
+        uuid=$(date +%s | cut -c1-8)
+    else
+        echo "❌ Cannot generate session ID (no uuidgen or date)" >&2
+        return 1
+    fi
+    [ -z "$uuid" ] && { echo "❌ Failed to generate a valid UUID" >&2; return 1; }
+
+    # Validate required tools before proceeding
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "❌ python3 is required but not found" >&2
+        return 1
+    fi
 
     # Render agent SKILL.md (generated on the fly — pass UUID)
     local rendered_skill_md
@@ -255,6 +333,12 @@ load-skill() {
         done
     fi
 
+    # Validate template files before processing
+    if [ ! -f "$_prompt_template" ]; then
+        echo "❌ Prompt template not found: $_prompt_template" >&2
+        return 1
+    fi
+
     # Render template with python (safe — reads from files)
     echo "$rendered_skill_md" > "$tmpdir/skill.md"
     printf '%s' "$skills_section" > "$tmpdir/skills.md"
@@ -273,6 +357,10 @@ print(template, end='')
 
     # Write to temp file (reliable for large text)
     local tmp_file
+    if ! command -v mktemp >/dev/null 2>&1; then
+        echo "❌ mktemp is required but not found" >&2
+        return 1
+    fi
     tmp_file=$(mktemp /tmp/mega-prompt-XXXXXX.md)
     printf '%s\n' "$mega_prompt" > "$tmp_file"
 
