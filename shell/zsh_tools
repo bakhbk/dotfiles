@@ -653,3 +653,130 @@ netcheck() {
         echo "⚠️  Частичное подключение — некоторые серверы не доступны"
     fi
 }
+
+
+# Agent Runner Selector
+# Usage: gar [-e|-d|-r "task"|-h]
+#   -e, --edit      : open rendered SKILL.md in $EDITOR, then copy to clipboard
+#   -d, --dry-run   : show rendered SKILL.md in terminal (no clipboard)
+#   -r, --run "task": render + pass directly to pi with task
+#   -h, --help      : show this help message
+#   default         : render and copy to clipboard
+gar() {
+    local config_file="$HOME/.config/agent-runner/config.json"
+    local edit_mode=false
+    local run_mode=false
+    local dry_run_mode=false
+    local help_mode=false
+    local task=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -e|--edit)   edit_mode=true; shift ;;
+            -d|--dry-run) dry_run_mode=true; shift ;;
+            -r|--run)    run_mode=true; shift; task="$*"; break ;;
+            -h|--help)   help_mode=true; shift ;;
+            *)           shift ;;
+        esac
+    done
+
+    # Show help if requested
+    if $help_mode; then
+        echo "Usage: gar [-e|-d|-r \"task\"]"
+        echo ""
+        echo "Options:"
+        echo "  -e, --edit      Open rendered SKILL.md in \$EDITOR, then copy to clipboard"
+        echo "  -d, --dry-run   Show rendered SKILL.md in terminal (no clipboard)"
+        echo "  -r, --run \"task\" Render and pass directly to pi with task"
+        echo "  -h, --help      Show this help message"
+        echo ""
+        echo "Default: render and copy to clipboard"
+        return 0
+    fi
+
+    # Check config exists
+    if [ ! -f "$config_file" ]; then
+        echo "❌ Config not found: $config_file" >&2
+        return 1
+    fi
+
+    # Select agent via fzf with preview
+    local agent
+    agent=$(jq -r '.agents | keys[]' "$config_file" 2>/dev/null | \
+            fzf --preview-window=wrap --preview "jq '.agents[\"{}\"]' $config_file" 2>/dev/null) || return
+
+    [ -z "$agent" ] && return
+    echo "✓ Selected agent: $agent"
+
+    # Read config values
+    local invocation system_prompt_flag prompt_prefix
+    invocation=$(jq -r ".agents[\"$agent\"].invocation" "$config_file")
+    system_prompt_flag=$(jq -r ".agents[\"$agent\"].system_prompt_flag" "$config_file")
+    prompt_prefix=$(jq -r ".agents[\"$agent\"].prompt_prefix" "$config_file")
+
+    # Generate UUID once per invocation
+    local uuid
+    uuid=$(uuidgen | cut -c1-8)
+
+    # Auto-create session directory
+    mkdir -p "$HOME/.cache/agent-runner/$uuid"
+
+    # Clean old prompt directories (>7 days)
+    find "$HOME/.cache/agent-runner" -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + 2>/dev/null
+
+    # Render SKILL.md template using python3
+    local rendered
+    rendered=$(python3 -c "
+import sys, json
+template = open('$HOME/.agents/skills/agent-runner/SKILL.md').read()
+template = template.replace('{{AGENT_NAME}}', '$agent')
+template = template.replace('{{INVOCATION}}', '''$invocation''')
+template = template.replace('{{SYSTEM_PROMPT_FLAG}}', '$system_prompt_flag')
+template = template.replace('{{PROMPT_PREFIX}}', '$prompt_prefix')
+template = template.replace('{{SESSION_UUID}}', '$uuid')
+print(template, end='')
+")
+
+    if $run_mode; then
+        # --run: create temp file and pass to pi
+        local tmp_file
+        tmp_file=$(mktemp /tmp/skill-XXXXXX.md)
+        echo "$rendered" > "$tmp_file"
+        echo "🚀 Running agent $agent with task: $task"
+        pi --skill "$tmp_file" -p "$task"
+        rm -f "$tmp_file"
+
+    elif $edit_mode; then
+        # --edit: open in editor, then copy to clipboard
+        local tmp_file
+        tmp_file=$(mktemp /tmp/skill-XXXXXX.md)
+        echo "$rendered" > "$tmp_file"
+        local editor="${EDITOR:-nvim}"
+        $editor "$tmp_file"
+        if command -v pbcopy >/dev/null 2>&1; then
+            cat "$tmp_file" | pbcopy
+        elif command -v wl-copy >/dev/null 2>&1; then
+            cat "$tmp_file" | wl-copy
+        else
+            cat "$tmp_file" | xclip -selection clipboard
+        fi
+        rm -f "$tmp_file"
+        echo "✓ Rendered SKILL.md for $agent copied to clipboard"
+
+    elif $dry_run_mode; then
+        # --dry-run: show in terminal
+        echo "$rendered"
+
+    else
+        # default: copy to clipboard
+        if command -v pbcopy >/dev/null 2>&1; then
+            echo "$rendered" | pbcopy
+        elif command -v wl-copy >/dev/null 2>&1; then
+            echo "$rendered" | wl-copy
+        else
+            echo "$rendered" | xclip -selection clipboard
+        fi
+        echo "✓ Rendered SKILL.md for $agent copied to clipboard"
+    fi
+}
