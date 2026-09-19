@@ -47,6 +47,7 @@ path+=(/sbin)
 # Load scripts
 source ~/.dotfiles/zsh_aliases
 source ~/.dotfiles/zsh_tools
+source ~/.dotfiles/agent-runner.sh
 source ~/.dotfiles/zshenv
 source ~/.dotfiles/create_tmux_session.sh
 source ~/.dotfiles/commit.sh

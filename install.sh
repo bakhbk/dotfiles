@@ -19,6 +19,7 @@ CONFIGS=(
   shell/bash_tools
   shell/zsh_aliases
   shell/zsh_tools
+  shell/agent-runner.sh
   shell/zshenv
   shell/.zshrc
   installers/install-oh-my-zsh.sh
