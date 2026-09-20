@@ -499,8 +499,9 @@ fs() {
     # change:reload(...): every typed character triggers a content search via
     # grep over files in this directory (the official fzf 0.7x pattern).
     # ${(q)dir} -- shell-safe quoting; \\{} -- escape плейсхолдера fzf.
-    local _reloader="find $qdir -maxdepth 1 -type f -exec grep -il -- \"\$FZF_QUERY\" \\{} + 2>/dev/null"
-    f=$(find "$dir" -maxdepth 1 -type f \
+    # No -maxdepth: recursive find for nested directory structures.
+    local _reloader="find $qdir -type f -exec grep -il -- \"\$FZF_QUERY\" \\{} + 2>/dev/null"
+    f=$(find "$dir" -type f \
         | fzf --disabled \
                --bind "change:reload(${_reloader})" \
                --preview-window=wrap --preview 'head -75 {} | cut -c1-250') || return
