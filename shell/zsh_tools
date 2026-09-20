@@ -495,8 +495,15 @@ fs() {
     shift $((OPTIND - 1))
     [ $# -gt 0 ] && dir="$1"
 
-    local f
-    f=$(find "$dir" -maxdepth 1 -type f | fzf --preview-window=wrap --preview 'head -75 {} | cut -c1-250') || return
+    local qdir="${(q)dir}"
+    # change:reload(...): every typed character triggers a content search via
+    # grep over files in this directory (the official fzf 0.7x pattern).
+    # ${(q)dir} -- shell-safe quoting; \\{} -- escape плейсхолдера fzf.
+    local _reloader="find $qdir -maxdepth 1 -type f -exec grep -il -- \"\$FZF_QUERY\" \\{} + 2>/dev/null"
+    f=$(find "$dir" -maxdepth 1 -type f \
+        | fzf --disabled \
+               --bind "change:reload(${_reloader})" \
+               --preview-window=wrap --preview 'head -75 {} | cut -c1-250') || return
     [ -z "$f" ] && return
     echo "$f"
 
@@ -504,12 +511,10 @@ fs() {
         local editor="${EDITOR:-nvim}"
         $editor "$f"
     else
-        if command -v pbcopy >/dev/null 2>&1; then
-            cat "$f" | pbcopy
-        elif command -v wl-copy >/dev/null 2>&1; then
-            cat "$f" | wl-copy
-        else
-            cat "$f" | xclip -selection clipboard
+        if   command -v pbcopy >/dev/null 2>&1; then pbcopy  < "$f"
+        elif command -v wl-copy >/dev/null 2>&1; then wl-copy < "$f"
+        elif command -v xclip >/dev/null 2>&1;   then xclip -selection clipboard < "$f"
+        else echo "No clipboard tool found" >&2; return 1
         fi
         echo "✓ contents copied to clipboard"
     fi
