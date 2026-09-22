@@ -668,6 +668,19 @@ netcheck() {
 #   -r, --run "task": render + pass directly to pi with task
 #   -h, --help      : show this help message
 #   default         : render and copy to clipboard
+# Find and run command on all files matching <name> (e.g. frn pubspec.yaml "fcl;fpg;pwd")
+frn() {
+  local ROOT="${ROOT_DIR:-.}"
+  [ -n "$1" ] && [ -n "$2" ] || { echo "❌ usage: ROOT_DIR=/path frn <file> <cmd>"; exit 1; }
+  [ ! -d "$ROOT" ] && exit 1
+  find "$ROOT" -name "$1" -type f | grep -vE '/(example|\.symlinks|build|\.dart_tool)/' \
+    | sort | while read -r p; do
+      local d
+      d="$(dirname "$p")"
+      echo "📦 $(cd "$d" && pwd)" && (cd "$d" && eval "$2" 2>&1) && echo "   ✅" || echo "   ❌"
+    done; echo "✅ Done"
+}
+
 gar() {
     local config_file="$HOME/.config/agent-runner/config.json"
     local edit_mode=false
