@@ -668,10 +668,14 @@ netcheck() {
 #   -r, --run "task": render + pass directly to pi with task
 #   -h, --help      : show this help message
 #   default         : render and copy to clipboard
-# Find and run command on all files matching <name> (e.g. frn pubspec.yaml "fcl;fpg;pwd")
+# Find and run command on all matching files (e.g. frn pubspec.yaml "fcl;fpg")
 frn() {
   local ROOT="${ROOT_DIR:-.}"
-  [ -n "$1" ] && [ -n "$2" ] || { echo "❌ usage: ROOT_DIR=/path frn <file> <cmd>"; exit 1; }
+  [ -n "$1" ] && [ -n "$2" ] || {
+    echo "❌ frn <file> <cmd>"
+    echo "   ROOT_DIR=/path frn <file> \"<cmd1>;<cmd2>;...\""
+    return 1
+  }
   [ ! -d "$ROOT" ] && exit 1
   find "$ROOT" -name "$1" -type f | grep -vE '/(example|\.symlinks|build|\.dart_tool)/' \
     | sort | while read -r p; do
