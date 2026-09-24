@@ -279,13 +279,15 @@ def _consume_stream(resp, on_delta=None):
     ttft = (t_first - t0) if t_first is not None else None
     gen_dur = (t_last - t_first) if (t_first and t_last and t_last > t_first) else 0.0
     tps = ((n_chunks - 1) / gen_dur) if gen_dur > 0 else None
-    tps_usage = None
+    ct_total = 0
     if usage:
-        ct = usage.get("completion_tokens")
-        if ct and gen_dur > 0:
-            tps_usage = ct / gen_dur
+        ct_total = usage.get("completion_tokens") or 0
+    tps_usage = None
+    if ct_total and gen_dur > 0:
+        tps_usage = ct_total / gen_dur
     stats = {"ttft": ttft, "tps": tps, "tps_usage": tps_usage, "dur": dur,
-             "gen_dur": gen_dur, "n_chunks": n_chunks, "usage": usage}
+             "gen_dur": gen_dur, "n_chunks": n_chunks,
+             "ct_total": ct_total, "usage": usage}
     return (content.strip(),
             [tcs[i] for i in sorted(tcs)],
             finish,
@@ -520,18 +522,14 @@ def _merge_stats(a: dict, b: dict) -> dict:
     a["n_chunks"] = (a.get("n_chunks") or 0) + (b.get("n_chunks") or 0)
     a["dur"] = (a.get("dur") or 0.0) + (b.get("dur") or 0.0)
     a["gen_dur"] = (a.get("gen_dur") or 0.0) + (b.get("gen_dur") or 0.0)
+    a["ct_total"] = (a.get("ct_total") or 0) + (b.get("ct_total") or 0)
     if a.get("ttft") is None and b.get("ttft") is not None:
         a["ttft"] = b["ttft"]
     if b.get("usage"):
         a["usage"] = b["usage"]
     gd = a["gen_dur"]
     a["tps"] = ((a["n_chunks"] - 1) / gd) if gd > 0 else None
-    a["tps_usage"] = None
-    u = a.get("usage")
-    if u:
-        ct = u.get("completion_tokens")
-        if ct and gd > 0:
-            a["tps_usage"] = ct / gd
+    a["tps_usage"] = (a["ct_total"] / gd) if (a["ct_total"] and gd > 0) else None
     return a
 
 
