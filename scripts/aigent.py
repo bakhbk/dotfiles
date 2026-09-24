@@ -285,7 +285,7 @@ def _consume_stream(resp, on_delta=None):
         if ct and gen_dur > 0:
             tps_usage = ct / gen_dur
     stats = {"ttft": ttft, "tps": tps, "tps_usage": tps_usage, "dur": dur,
-             "n_chunks": n_chunks, "usage": usage}
+             "gen_dur": gen_dur, "n_chunks": n_chunks, "usage": usage}
     return (content.strip(),
             [tcs[i] for i in sorted(tcs)],
             finish,
@@ -515,6 +515,26 @@ def _make_stream_logger(turn):
     return emit, flush
 
 
+def _merge_stats(a: dict, b: dict) -> dict:
+    """Сливает статистику continuation-вызова b в a (in place)."""
+    a["n_chunks"] = (a.get("n_chunks") or 0) + (b.get("n_chunks") or 0)
+    a["dur"] = (a.get("dur") or 0.0) + (b.get("dur") or 0.0)
+    a["gen_dur"] = (a.get("gen_dur") or 0.0) + (b.get("gen_dur") or 0.0)
+    if a.get("ttft") is None and b.get("ttft") is not None:
+        a["ttft"] = b["ttft"]
+    if b.get("usage"):
+        a["usage"] = b["usage"]
+    gd = a["gen_dur"]
+    a["tps"] = ((a["n_chunks"] - 1) / gd) if gd > 0 else None
+    a["tps_usage"] = None
+    u = a.get("usage")
+    if u:
+        ct = u.get("completion_tokens")
+        if ct and gd > 0:
+            a["tps_usage"] = ct / gd
+    return a
+
+
 def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
     status(f"🔗 provider={LLM_PROVIDER} {LLM_BASE_URL} model={LLM_MODEL}")
     log(f"prompt: {user_message}")
@@ -541,6 +561,29 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                     messages, on_delta=emit)
             finally:
                 flush()
+            if finish_reason == "length":
+                # Бюджет выгорел (типично для reasoning-моделей: think съел весь max_tokens).
+                # Дожимаем: просим продолжить, пока модель не закончит сама.
+                full = content
+                cont = 0
+                while finish_reason == "length" and cont < MAX_CONTINUES:
+                    cont += 1
+                    log(f"turn {turn}: finish=length → continuation {cont}/{MAX_CONTINUES}")
+                    am = {"role": "assistant", "content": content}
+                    if reasoning:
+                        am["reasoning_content"] = reasoning
+                    messages.append(am)
+                    messages.append({"role": "user",
+                                     "content": "Продолжи с места, где остановился. "
+                                                "Не повторяй уже написанное."})
+                    content, tool_calls, finish_reason, reasoning, _stats = call_llm(messages)
+                    _merge_stats(stats, _stats)
+                    log(f"turn {turn}: continuation {cont}: content={len(content)}c "
+                        f"finish={finish_reason}")
+                    full = (full or "") + (content or "")
+                content = full
+                if finish_reason == "length":
+                    log("⚠️ answer may be incomplete (still truncated after continuations)")
             turns_stats.append(stats)
             ttft = stats.get("ttft")
             tps = stats.get("tps")
@@ -560,28 +603,6 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                    f"finish={finish_reason} content={len(content)}c "
                    f"reasoning={len(reasoning)}c tools={len(tool_calls)} "
                    f"dur={dur:.2f}s{usage_note}")
-            if finish_reason == "length":
-                # Бюджет выгорел (типично для reasoning-моделей: think съел весь max_tokens).
-                # Дожимаем: просим продолжить, пока модель не закончит сама.
-                full = content
-                cont = 0
-                while finish_reason == "length" and cont < MAX_CONTINUES:
-                    cont += 1
-                    log(f"turn {turn}: finish=length → continuation {cont}/{MAX_CONTINUES}")
-                    am = {"role": "assistant", "content": content}
-                    if reasoning:
-                        am["reasoning_content"] = reasoning
-                    messages.append(am)
-                    messages.append({"role": "user",
-                                     "content": "Продолжи с места, где остановился. "
-                                                "Не повторяй уже написанное."})
-                    content, tool_calls, finish_reason, reasoning, _stats = call_llm(messages)
-                    log(f"turn {turn}: continuation {cont}: content={len(content)}c "
-                        f"finish={finish_reason}")
-                    full = (full or "") + (content or "")
-                content = full
-                if finish_reason == "length":
-                    log("⚠️ answer may be incomplete (still truncated after continuations)")
             if content:
                 last_content = content
 
