@@ -427,21 +427,24 @@ def _make_stream_logger(turn):
     В stdout при -v: стримится вживую по мере прихода чанков, без обрезки.
     """
     state = {"kind": None, "buf": "",
-             "out_kind": None, "out_open": False}
+             "out_kind": None, "out_open": False, "out_ended_nl": False}
 
     def _pump_out(kind, text):
         """Пишет текст в stdout при -v. На смене kind закрывает строку
-        и открывает новую с префиксом '💭 '/'🤖 '."""
+        и открывает новую с префиксом '💭 '/'🤖 '. Не добавляет пустую
+        строку, если предыдущий вывод уже закончился переводом строки."""
         if not VERBOSE:
             return
         if kind != state["out_kind"]:
-            if state["out_open"]:
+            if state["out_open"] and not state["out_ended_nl"]:
                 print(flush=True)
-            print("\n💭 " if kind == "reasoning" else "🤖 ",
+            print("\n💭 " if kind == "reasoning" and not state["out_ended_nl"]
+                  else ("🤖 " if kind == "content" else "💭 "),
                   end="", flush=True)
             state["out_kind"] = kind
             state["out_open"] = True
         print(text, end="", flush=True)
+        state["out_ended_nl"] = text.endswith("\n")
 
     def emit(kind, chunk):
         if kind != state["kind"]:
@@ -518,8 +521,6 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                     log("⚠️ answer may be incomplete (still truncated after continuations)")
             if content:
                 last_content = content
-            if VERBOSE and content:
-                print(f"\n🤖 {content}")
 
             if not tool_calls:  # финальный ответ
                 if content:
