@@ -20,6 +20,7 @@
 
 import argparse
 import base64
+import configparser
 import json
 import os
 import queue
@@ -39,8 +40,31 @@ import requests
 # Config
 # --------------------------------------------------------------------------
 
+PROVIDERS_CONF = os.path.expanduser(
+    os.getenv("DISPATCH_PROVIDERS_CONF", "~/.config/dispatch/providers.conf"))
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:8080/v1")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "none")
+
+
+def _load_provider_conf(provider):
+    """Вернуть (url, key) для провайдера из dispatch-конфига, иначе (None, None)."""
+    if not provider:
+        return None, None
+    cp = configparser.ConfigParser()
+    try:
+        if not cp.read(PROVIDERS_CONF):
+            return None, None
+    except (OSError, configparser.Error):
+        return None, None
+    if provider not in cp:
+        return None, None
+    sec = cp[provider]
+    url = sec.get("url") or None
+    key = sec.get("key") or None
+    if key:
+        key = key.strip().strip('"').strip("'")
+    return url, key
+
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen")
 LLM_THINKING = os.getenv("LLM_THINKING", "on")  # on (default) | off — режим рассуждений
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "local")  # человекочитаемое имя бэкенда для 📄/🔗 строк
@@ -100,6 +124,7 @@ LLM_TOOLS = [
 
 VERBOSE = False
 QUIET = False
+NO_USAGE = False
 LOG_FILE = ""
 _log_q: queue.Queue = queue.Queue()
 _log_thread: threading.Thread | None = None
@@ -138,8 +163,10 @@ def log(msg: str = "") -> None:
 
 
 def status(msg: str) -> None:
-    """Короткая строка прогресса: в stdout (если не quiet) + в файл."""
-    if not QUIET:
+    """Короткая строка прогресса: в stdout (если не quiet) + в файл.
+    Ошибки (💥 ❌ ⛔ ⚠️) печатаются даже при --quiet."""
+    is_error = msg.startswith(("💥", "❌", "⛔", "⚠️"))
+    if not QUIET or is_error:
         print(msg, flush=True)
     _log_q.put(msg)
 
@@ -306,8 +333,9 @@ def call_llm(messages, on_delta=None):
     """
     payload = {"model": LLM_MODEL, "messages": messages, "tools": LLM_TOOLS,
                "tool_choice": "auto", "temperature": 0.1, "max_tokens": MAX_TOKENS,
-               "stream": True,
-               "stream_options": {"include_usage": True}}
+               "stream": True}
+    if not NO_USAGE:
+        payload["stream_options"] = {"include_usage": True}
     if LLM_THINKING == "off":
         # «дробовик»: все известные диалекты off (как в doit.sh) — провайдеры
         # понимают только свои флаги, остальные игнорируют.
@@ -667,7 +695,7 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
 
 
 def main() -> int:
-    global VERBOSE, QUIET, LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL, MAX_TURNS, LLM_THINKING
+    global VERBOSE, QUIET, NO_USAGE, LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL, LLM_API_KEY, MAX_TURNS, LLM_THINKING
     parser = argparse.ArgumentParser(description="LLM coding agent (v2)")
     parser.add_argument("prompt", nargs="?", help="Task description")
     parser.add_argument("-s", "--system-prompt", default=None,
@@ -676,6 +704,9 @@ def main() -> int:
                         help="Full details on stdout")
     parser.add_argument("-q", "--quiet", action="store_true",
                         help="Silence progress on stdout (log still written)")
+    parser.add_argument("--no-usage", action="store_true",
+                        help="Do not request stream usage (for backends that "
+                             "reject stream_options)")
     parser.add_argument("--provider", default=None,
                         help="Override LLM_PROVIDER (label for 📄/🔗)")
     parser.add_argument("--model", default=None,
@@ -724,6 +755,17 @@ def main() -> int:
 
     VERBOSE = args.verbose
     QUIET = args.quiet
+    NO_USAGE = args.no_usage
+
+    # Порядок приоритетов: env-переменные > секция [provider] в dispatch.conf > дефолты
+    if not os.environ.get("LLM_BASE_URL") or not os.environ.get("LLM_API_KEY"):
+        url, key = _load_provider_conf(LLM_PROVIDER)
+        if not os.environ.get("LLM_BASE_URL") and url:
+            LLM_BASE_URL = url
+        if not os.environ.get("LLM_API_KEY") and key:
+            LLM_API_KEY = key
+        LLM_HEADERS["Authorization"] = f"Bearer {LLM_API_KEY}"
+
     signal.signal(signal.SIGINT, _on_int)
     start_log()
     try:
