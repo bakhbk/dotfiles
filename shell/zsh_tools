@@ -828,3 +828,16 @@ print(template, end='')
         echo "✓ Rendered SKILL.md for $agent copied to clipboard"
     fi
 }
+
+# Install APK on a selected device
+# Usage: apk <path-to-apk>
+apk() {
+    local apk_file=${1:?"Usage: apk <path-to-apk>"}
+    [ -f "$apk_file" ] || { echo "no file: $apk_file"; return 1; }
+
+    local serial
+    serial=$(adb devices | awk 'NR>1 && $2=="device" {print $1}' | fzf --height 20% --reverse --header "Устройство: ")
+    [ -n "$serial" ] || return 1
+
+    adb -s "$serial" install -r "$apk_file"
+}

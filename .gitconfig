@@ -1,0 +1,7 @@
+[core]
+	editor = vim
+	excludesfile = /Users/b/.gitignore
+[includeIf "gitdir:/Users/b/own_projects/**"]
+	path = ~/.gitconfig-default
+[includeIf "gitdir:/Users/b/work/KR/**"]
+	path = ~/.gitconfig-work
