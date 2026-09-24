@@ -105,6 +105,30 @@ Workflow:
 
 Be concise. Explain what you're doing before each command."""
 
+BASH_TAIL = """
+
+You have ONE tool: `bash` — it executes shell commands and returns stdout/stderr.
+Use it to read/write files and run commands.
+Budget: {max_turns} turns. Plan accordingly.
+
+Workflow:
+1. If the task requires reading/editing files — do it via `bash`.
+2. When the task is done, reply with a regular message (no tool call).
+
+Be concise. Do not explore beyond the task. Do not plan out loud.
+"""
+
+
+def _compose_system_prompt(custom: str | None, max_turns: int) -> str:
+    """system = custom (skill) + bash tail. Без custom — дефолтный SYSTEM_PROMPT.
+
+    `.replace` вместо `.format`: скиллы содержат JSON-примеры с `{...}`,
+    `.format` на них упал бы.
+    """
+    base = custom.strip() if custom and custom.strip() else SYSTEM_PROMPT
+    return (base + BASH_TAIL).replace("{max_turns}", str(max_turns))
+
+
 LLM_TOOLS = [
     {"type": "function",
      "function": {"name": "bash",
@@ -592,8 +616,7 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
         n = sum(1 for c in user_content if c.get("type") == "image_url")
         log(f"🖼️  {n} image(s) attached")
 
-    system_content = (system_prompt.replace("{max_turns}", str(MAX_TURNS))
-                      if "{max_turns}" in system_prompt else system_prompt)
+    system_content = _compose_system_prompt(system_prompt, MAX_TURNS)
     messages = [{"role": "system", "content": system_content},
                 {"role": "user", "content": user_content}]
 
@@ -714,11 +737,13 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
 
 
 def main() -> int:
-    global VERBOSE, QUIET, NO_USAGE, LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL, LLM_API_KEY, MAX_TURNS, LLM_THINKING
+    global VERBOSE, QUIET, NO_USAGE, LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL, LLM_API_KEY, MAX_TURNS, MAX_TOKENS, LLM_THINKING
     parser = argparse.ArgumentParser(description="LLM coding agent (v2)")
     parser.add_argument("prompt", nargs="?", help="Task description")
     parser.add_argument("-s", "--system-prompt", default=None,
-                        help="Custom system prompt")
+                        help="Custom system prompt (string)")
+    parser.add_argument("--system-prompt-file", default=None,
+                        help="Read system prompt from file")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="Full details on stdout")
     parser.add_argument("-q", "--quiet", action="store_true",
@@ -736,6 +761,8 @@ def main() -> int:
                         help="Read task from file (use - for stdin)")
     parser.add_argument("--max-turns", type=int, default=None,
                         help=f"Override MAX_TURNS (default: {MAX_TURNS})")
+    parser.add_argument("--max-tokens", type=int, default=None,
+                        help=f"Override MAX_TOKENS (default: {MAX_TOKENS})")
     parser.add_argument("--no-thinking", action="store_true",
                         help="Force LLM_THINKING=off")
     parser.add_argument("--cwd", default=None,
@@ -750,6 +777,8 @@ def main() -> int:
         LLM_BASE_URL = args.base_url
     if args.max_turns:
         MAX_TURNS = args.max_turns
+    if args.max_tokens:
+        MAX_TOKENS = args.max_tokens
     if args.no_thinking:
         LLM_THINKING = "off"
     if args.cwd:
@@ -785,11 +814,15 @@ def main() -> int:
             LLM_API_KEY = key
         LLM_HEADERS["Authorization"] = f"Bearer {LLM_API_KEY}"
 
+    system_prompt = args.system_prompt
+    if args.system_prompt_file:
+        with open(args.system_prompt_file, encoding="utf-8") as f:
+            system_prompt = f.read()
+
     signal.signal(signal.SIGINT, _on_int)
     start_log()
     try:
-        return agent_loop(task_text,
-                          system_prompt=args.system_prompt or SYSTEM_PROMPT)
+        return agent_loop(task_text, system_prompt=system_prompt)
     finally:
         stop_log()
 
