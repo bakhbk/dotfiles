@@ -304,7 +304,8 @@ def call_llm(messages, on_delta=None):
     """
     payload = {"model": LLM_MODEL, "messages": messages, "tools": LLM_TOOLS,
                "tool_choice": "auto", "temperature": 0.1, "max_tokens": MAX_TOKENS,
-               "stream": True}
+               "stream": True,
+               "stream_options": {"include_usage": True}}
     if LLM_THINKING == "off":
         # «дробовик»: все известные диалекты off (как в doit.sh) — провайдеры
         # понимают только свои флаги, остальные игнорируют.
