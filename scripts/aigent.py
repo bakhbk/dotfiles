@@ -119,12 +119,22 @@ Be concise. Do not explore beyond the task. Do not plan out loud.
 """
 
 
+NO_TOOLS_TAIL = """
+
+Answer directly. Do not call tools. Do not explore files.
+Produce exactly the output format the task specifies. Be concise.
+"""
+
+
 def _compose_system_prompt(custom: str | None, max_turns: int) -> str:
-    """system = custom (skill) + bash tail. Без custom — дефолтный SYSTEM_PROMPT.
+    """system = custom (skill) + tail. Без custom — дефолтный SYSTEM_PROMPT.
 
     `.replace` вместо `.format`: скиллы содержат JSON-примеры с `{...}`,
     `.format` на них упал бы.
     """
+    if NO_TOOLS:
+        base = custom.strip() if custom and custom.strip() else ""
+        return base + NO_TOOLS_TAIL
     base = custom.strip() if custom and custom.strip() else SYSTEM_PROMPT
     return (base + BASH_TAIL).replace("{max_turns}", str(max_turns))
 
@@ -149,6 +159,7 @@ LLM_TOOLS = [
 VERBOSE = False
 QUIET = False
 NO_USAGE = False
+NO_TOOLS = False
 LOG_FILE = ""
 _log_q: queue.Queue = queue.Queue()
 _log_thread: threading.Thread | None = None
@@ -373,9 +384,12 @@ def call_llm(messages, on_delta=None):
     Stream: чанки идут по мере генерации → read-timeout считает паузу между
     чанками, «медленно думает» ≠ «умер» (нет ложных retry).
     """
-    payload = {"model": LLM_MODEL, "messages": messages, "tools": LLM_TOOLS,
-               "tool_choice": "auto", "temperature": 0.1, "max_tokens": MAX_TOKENS,
+    payload = {"model": LLM_MODEL, "messages": messages,
+               "temperature": 0.1, "max_tokens": MAX_TOKENS,
                "stream": True}
+    if not NO_TOOLS:
+        payload["tools"] = LLM_TOOLS
+        payload["tool_choice"] = "auto"
     if not NO_USAGE:
         payload["stream_options"] = {"include_usage": True}
     if LLM_THINKING == "off":
@@ -737,7 +751,7 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
 
 
 def main() -> int:
-    global VERBOSE, QUIET, NO_USAGE, LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL, LLM_API_KEY, MAX_TURNS, MAX_TOKENS, LLM_THINKING
+    global VERBOSE, QUIET, NO_USAGE, NO_TOOLS, LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL, LLM_API_KEY, MAX_TURNS, MAX_TOKENS, LLM_THINKING
     parser = argparse.ArgumentParser(description="LLM coding agent (v2)")
     parser.add_argument("prompt", nargs="?", help="Task description")
     parser.add_argument("-s", "--system-prompt", default=None,
@@ -751,6 +765,8 @@ def main() -> int:
     parser.add_argument("--no-usage", action="store_true",
                         help="Do not request stream usage (for backends that "
                              "reject stream_options)")
+    parser.add_argument("--no-tools", action="store_true",
+                        help="Do not offer bash tool (verdict-only roles)")
     parser.add_argument("--provider", default=None,
                         help="Override LLM_PROVIDER (label for 📄/🔗)")
     parser.add_argument("--model", default=None,
@@ -804,6 +820,7 @@ def main() -> int:
     VERBOSE = args.verbose
     QUIET = args.quiet
     NO_USAGE = args.no_usage
+    NO_TOOLS = args.no_tools
 
     # Порядок приоритетов: env-переменные > секция [provider] в dispatch.conf > дефолты
     if not os.environ.get("LLM_BASE_URL") or not os.environ.get("LLM_API_KEY"):
