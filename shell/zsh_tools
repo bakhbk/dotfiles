@@ -372,43 +372,46 @@ function gi() {
   curl -sLw '\n' https://www.toptal.com/developers/gitignore/api/$@
 }
 
-gitdo() {
- printf 'in %s\n' "$(pwd)" >&2
-
- # gitdo "..." | pbcopy  →  копирование через временный файл (надёжно)
- local COPY_FILE=""
- [[ -t 3 ]] && COPY_FILE=$(mktemp)
- exec 3</dev/null
-
- find . -name .git -type d -prune | while read -r gitdir; do
-
- repo_dir=$(dirname "$gitdir" | sed 's|^\./||')
- if [ "$repo_dir" = "." ]; then
- repo_dir="Корневая папка"
- fi
-
-
- branch=$(git -C "$(dirname "$gitdir")" branch --show-current 2>/dev/null)
-
- out=$(cd "$(dirname "$gitdir")" && eval "$@" | sed $'s/\x1b\[[0-9;]*m//g')
- if [ -z "$out" ]; then
-   printf '· %s%s — без изменений\n\n' "$repo_dir" "${branch:+ ($branch)}" >&2
- else
-   printf '\033[2m┌─ %s%s\033[0m\n' "$repo_dir" "${branch:+ ($branch)}" >&2
-   if [ -n "$COPY_FILE" ]; then
-     printf '%s\n' "$out" >> "$COPY_FILE"
-   else
-     printf '%s\n' "$out"
-   fi
-   printf '\033[2m└──────────────────────────────\033[0m\n\n' >&2
- fi
- done
- # копирование через файл — надёжно, без пайп-буферов
- if [ -n "$COPY_FILE" ]; then
-   pbcopy < "$COPY_FILE"; rm -f "$COPY_FILE"
-   printf '✓ скопировано в буфер\n' >&2
- fi
-}
+gitdo() {                                                                                            
+    echo "in $(pwd)" >&2                                                                                
+                                                                                                        
+    # gitdo "..." | pbcopy  →  копирование через временный файл (надёжно)                               
+    local COPY_FILE=""                                                                                  
+    [[ -t 3 ]] && COPY_FILE=$(mktemp)                                                                   
+    exec 3</dev/null                                                                                    
+                                                                                                        
+    find . -name .git -type d -prune | while read -r gitdir; do                                         
+        repo_dir=$(dirname "$gitdir" | sed 's|^\./||')                                                    
+        [ "$repo_dir" = "." ] && repo_dir="Корневая папка"                                                
+                                                                                                        
+        branch=$(git -C "$(dirname "$gitdir")" branch --show-current 2>/dev/null)                         
+                                                                     
+        if [ -n "$COPY_FILE" ]; then               
+            out=$(cd "$(dirname "$gitdir")" && eval "$@" | sed $'s/\x1b\[[0-9;]*m//g')
+        else                          
+            out=$(cd "$(dirname "$gitdir")" && eval "$@") 
+        fi
+                                                      
+        if [ -z "$out" ]; then                                                                            
+        echo "· $repo_dir${branch:+ ($branch)} — без изменений\n\n" >&2                                 
+        else                                                                                              
+        echo "\033[2m┌─ $repo_dir${branch:+ ($branch)}\033[0m\n" >&2                                    
+        if [ -n "$COPY_FILE" ]; then               
+            out=$(cd "$(dirname "$gitdir")" && eval "$@" | sed $'s/\x1b\[[0-9;]*m//g')
+            printf '%s\n' "$out" >> "$COPY_FILE"                                                          
+        else                          
+            out=$(cd "$(dirname "$gitdir")" && eval "$@") 
+            printf '%s\n' "$out"                                                                          
+        fi                                                                                              
+        echo "\033[2m└──────────────────────────────\033[0m\n\n" >&2                                    
+        fi                                                                                                
+    done                                                                                                
+    # копирование через файл — надёжно, без пайп-буферов                                                
+    if [ -n "$COPY_FILE" ]; then                                                                        
+        pbcopy < "$COPY_FILE"; rm -f "$COPY_FILE"                                                         
+        echo "✓ скопировано в буфер" >&2                                                                  
+    fi                                                                                                  
+}   
 
 # AI Agent runner
 # Usage: aigent [-s "system prompt"] "task"
