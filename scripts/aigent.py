@@ -99,6 +99,7 @@ LLM_TOOLS = [
 # --------------------------------------------------------------------------
 
 VERBOSE = False
+QUIET = False
 LOG_FILE = ""
 _log_q: queue.Queue = queue.Queue()
 _log_thread: threading.Thread | None = None
@@ -137,8 +138,9 @@ def log(msg: str = "") -> None:
 
 
 def status(msg: str) -> None:
-    """Короткая строка прогресса: в stdout всегда + в файл."""
-    print(msg, flush=True)
+    """Короткая строка прогресса: в stdout (если не quiet) + в файл."""
+    if not QUIET:
+        print(msg, flush=True)
     _log_q.put(msg)
 
 
@@ -665,13 +667,15 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
 
 
 def main() -> int:
-    global VERBOSE, LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL, MAX_TURNS, LLM_THINKING
+    global VERBOSE, QUIET, LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL, MAX_TURNS, LLM_THINKING
     parser = argparse.ArgumentParser(description="LLM coding agent (v2)")
     parser.add_argument("prompt", nargs="?", help="Task description")
     parser.add_argument("-s", "--system-prompt", default=None,
                         help="Custom system prompt")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="Full details on stdout")
+    parser.add_argument("-q", "--quiet", action="store_true",
+                        help="Silence progress on stdout (log still written)")
     parser.add_argument("--provider", default=None,
                         help="Override LLM_PROVIDER (label for 📄/🔗)")
     parser.add_argument("--model", default=None,
@@ -719,6 +723,7 @@ def main() -> int:
         return 1
 
     VERBOSE = args.verbose
+    QUIET = args.quiet
     signal.signal(signal.SIGINT, _on_int)
     start_log()
     try:
