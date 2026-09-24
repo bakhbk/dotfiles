@@ -290,9 +290,9 @@ def _consume_stream(resp, on_delta=None, on_first_token=None):
                     or delta.get("tool_calls")) and t_first is None:
                 now = time.monotonic()
                 t_first = now
-                log(f"⏱ first token +{now - t0:.2f}s")
                 if on_first_token:
                     on_first_token()
+                log(f"⏱ first token +{now - t0:.2f}s")
             if delta.get("reasoning_content"):
                 reasoning += delta["reasoning_content"]
                 if on_delta:
