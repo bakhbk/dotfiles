@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Usage: uv run ./aigent.py "hi" [-v] [--provider X --model Y]
 #        uv run ./aigent.py --prompt-file prompt.md --provider X --model Y
+#        uv run ./aigent.py --prompt-file - --cwd /path/to/project
 # /// script
 # dependencies = ["requests>=2.31.0"]
 # ///
@@ -46,10 +47,11 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "local")  # человекочитае�
 LLM_HEADERS = {"Content-Type": "application/json",
                "Authorization": f"Bearer {LLM_API_KEY}"}
 
-MAX_TURNS = 1000
+MAX_TURNS = int(os.getenv("AIGENT_MAX_TURNS", "50"))
 MAX_CONTINUES = 3                # сколько раз «дописывать» ответ при finish=length
-MAX_TOKENS = int(os.getenv("AIGENT_MAX_TOKENS", "16384"))  # бюджет вывода за вызов (think+ответ); поднять, если «may be incomplete»
-BASH_TIMEOUT = 120
+MAX_TOKENS = int(os.getenv("AIGENT_MAX_TOKENS", "32768"))  # бюджет вывода за вызов (think+ответ); поднять, если «may be incomplete»
+BASH_TIMEOUT = int(os.getenv("AIGENT_BASH_TIMEOUT", "120"))
+BASH_MAX_OUTPUT = int(os.getenv("AIGENT_BASH_MAX_OUTPUT", "262144"))  # жёсткий лимит stdout+stderr, байт
 LLM_TIMEOUT = (10, 300)          # (connect, read)
 STREAM_STALL = 180               # сек без полезных токенов в стриме = генератор умер
 RETRY_DELAYS = (3, 5, 10)        # 3 retry
@@ -63,6 +65,13 @@ SYSTEM_PROMPT = """\
 You are a coding agent. Your job is to help the user with programming tasks.
 
 You have access to ONE tool: `bash` — which executes shell commands and returns stdout/stderr.
+
+You have a budget of {max_turns} turns for this task (one turn = one LLM call,
+which may include one or more bash calls). Plan accordingly.
+- If the task fits in fewer turns, stop as soon as it's done.
+- If the task cannot be finished within the budget, deliver a partial result
+  with a clear status ("done: ..., remaining: ..., next step: ...") rather
+  than running out mid-work.
 
 Workflow:
 1. Plan what needs to be done.
@@ -306,6 +315,15 @@ def _on_int(signum, frame):
     raise KeyboardInterrupt
 
 
+def _cap(s: str, limit: int) -> tuple[str, int]:
+    """Обрезать строку до limit байт (utf-8). Вернуть (обрезанное, отброшено_байт)."""
+    b = s.encode("utf-8", errors="replace")
+    if len(b) <= limit:
+        return s, 0
+    cut = b[:limit].decode("utf-8", errors="replace")
+    return cut, len(b) - limit
+
+
 def run_bash(command: str) -> str:
     label = "bash: " + " ".join(command.split())[:60]
     with heartbeat(label):
@@ -321,8 +339,11 @@ def run_bash(command: str) -> str:
             return f"Error: command timed out after {BASH_TIMEOUT}s"
         finally:
             _CHILD[0] = None
-    out = out + (f"\nSTDERR:\n{err}" if err else "")
-    return f"Exit code: {p.returncode}\n{out}"
+    combined = out + (f"\nSTDERR:\n{err}" if err else "")
+    capped, dropped = _cap(combined, BASH_MAX_OUTPUT)
+    trailer = (f"\n[... output truncated: {dropped} bytes omitted]"
+               if dropped else "")
+    return f"Exit code: {p.returncode}\n{capped}{trailer}"
 
 
 def call_tool(name: str, arguments: dict) -> str:
@@ -400,18 +421,36 @@ def save_result(content: str, reason: str = "") -> str:
 # --------------------------------------------------------------------------
 
 def _make_stream_logger(turn):
-    """Буферизованный live-логгер для reasoning/content. Пишет в _log_q
-    крупными кусками, а не по токену."""
-    state = {"kind": None, "buf": ""}
+    """Live-логгер reasoning/content.
+
+    В лог (файл): буферизованные блоки до 800 символов, префикс '💭 '/'🤖 '.
+    В stdout при -v: стримится вживую по мере прихода чанков, без обрезки.
+    """
+    state = {"kind": None, "buf": "",
+             "out_kind": None, "out_open": False}
+
+    def _pump_out(kind, text):
+        """Пишет текст в stdout при -v. На смене kind закрывает строку
+        и открывает новую с префиксом '💭 '/'🤖 '."""
+        if not VERBOSE:
+            return
+        if kind != state["out_kind"]:
+            if state["out_open"]:
+                print(flush=True)
+            print("\n💭 " if kind == "reasoning" else "🤖 ",
+                  end="", flush=True)
+            state["out_kind"] = kind
+            state["out_open"] = True
+        print(text, end="", flush=True)
 
     def emit(kind, chunk):
         if kind != state["kind"]:
             if state["buf"]:
                 _log_q.put(state["buf"])
-                state["buf"] = ""
             state["kind"] = kind
             state["buf"] = "💭 " if kind == "reasoning" else "🤖 "
         state["buf"] += chunk
+        _pump_out(kind, chunk)
         if len(state["buf"]) > 800 or "\n\n" in chunk or chunk.endswith("\n"):
             _log_q.put(state["buf"])
             state["buf"] = ""
@@ -420,6 +459,10 @@ def _make_stream_logger(turn):
         if state["buf"]:
             _log_q.put(state["buf"])
             state["buf"] = ""
+        if state["out_open"]:
+            print(flush=True)
+            state["out_open"] = False
+            state["out_kind"] = None
 
     return emit, flush
 
@@ -433,7 +476,9 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
         n = sum(1 for c in user_content if c.get("type") == "image_url")
         log(f"🖼️  {n} image(s) attached")
 
-    messages = [{"role": "system", "content": system_prompt},
+    system_content = (system_prompt.replace("{max_turns}", str(MAX_TURNS))
+                      if "{max_turns}" in system_prompt else system_prompt)
+    messages = [{"role": "system", "content": system_content},
                 {"role": "user", "content": user_content}]
 
     last_content = ""
@@ -447,8 +492,6 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                     messages, on_delta=emit)
             finally:
                 flush()
-            if reasoning and VERBOSE:
-                print(f"\n💭 …{reasoning[-500:]}")
             log(f"turn {turn}: content={len(content)}c tools={len(tool_calls)} "
                 f"finish={finish_reason}")
             if finish_reason == "length":
@@ -519,7 +562,7 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
 
 
 def main() -> int:
-    global VERBOSE
+    global VERBOSE, LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL, MAX_TURNS, LLM_THINKING
     parser = argparse.ArgumentParser(description="LLM coding agent (v2)")
     parser.add_argument("prompt", nargs="?", help="Task description")
     parser.add_argument("-s", "--system-prompt", default=None,
@@ -535,12 +578,13 @@ def main() -> int:
     parser.add_argument("--prompt-file", default=None,
                         help="Read task from file (use - for stdin)")
     parser.add_argument("--max-turns", type=int, default=None,
-                        help="Override MAX_TURNS")
+                        help=f"Override MAX_TURNS (default: {MAX_TURNS})")
     parser.add_argument("--no-thinking", action="store_true",
                         help="Force LLM_THINKING=off")
+    parser.add_argument("--cwd", default=None,
+                        help="Working directory for bash tool (default: current)")
     args = parser.parse_args()
 
-    global LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL, MAX_TURNS, LLM_THINKING
     if args.provider:
         LLM_PROVIDER = args.provider
     if args.model:
@@ -551,6 +595,12 @@ def main() -> int:
         MAX_TURNS = args.max_turns
     if args.no_thinking:
         LLM_THINKING = "off"
+    if args.cwd:
+        cwd = os.path.expanduser(args.cwd)
+        if not os.path.isdir(cwd):
+            print(f"cwd not a directory: {cwd}", file=sys.stderr)
+            return 1
+        os.chdir(cwd)
 
     if args.prompt_file:
         if args.prompt_file == "-":
