@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-# Usage: uv run ./aigent2.py "hi" [-v]
+# Usage: uv run ./aigent.py "hi" [-v] [--provider X --model Y]
+#        uv run ./aigent.py --prompt-file prompt.md --provider X --model Y
 # /// script
 # dependencies = ["requests>=2.31.0"]
 # ///
-"""LLM coding agent v2.
+"""LLM coding agent.
 
 - stdout без -v: строки запуска (📄 log-файл, 🔗 provider/url/model) +
   финальный ответ + завершающие статусы (✅ done, 💾 saved, ⚠️/💥 ошибки).
@@ -174,7 +175,7 @@ class LLMError(RuntimeError):
         self.retryable = retryable
 
 
-def _consume_stream(resp):
+def _consume_stream(resp, on_delta=None):
     """Собирает (content, tool_calls, finish_reason, reasoning) из SSE-чанков.
 
     Пинги релеи не считаются: если STREAM_STALL секунд нет полезных токенов —
@@ -207,9 +208,13 @@ def _consume_stream(resp):
             meaningful = False
             if delta.get("reasoning_content"):
                 reasoning += delta["reasoning_content"]
+                if on_delta:
+                    on_delta("reasoning", delta["reasoning_content"])
                 meaningful = True
             if delta.get("content"):
                 content += delta["content"]
+                if on_delta:
+                    on_delta("content", delta["content"])
                 meaningful = True
             for d in delta.get("tool_calls") or []:
                 tc = tcs.setdefault(d.get("index", 0),
@@ -234,7 +239,7 @@ def _consume_stream(resp):
             reasoning)
 
 
-def call_llm(messages):
+def call_llm(messages, on_delta=None):
     """POST /chat/completions (stream). Возвращает (content, tool_calls, finish_reason, reasoning).
 
     Retry x3 (3/5/10s) на сетевые ошибки, 429, 5xx. 4xx — сразу LLMError.
@@ -267,7 +272,7 @@ def call_llm(messages):
                                    retryable=True)
                 if resp.status_code >= 400:
                     raise LLMError(f"HTTP {resp.status_code}: {resp.text[:300]}")
-                return _consume_stream(resp)
+                return _consume_stream(resp, on_delta=on_delta)
         except LLMError as e:
             last_err = str(e)
             if not e.retryable:
@@ -394,6 +399,31 @@ def save_result(content: str, reason: str = "") -> str:
 # Agent loop
 # --------------------------------------------------------------------------
 
+def _make_stream_logger(turn):
+    """Буферизованный live-логгер для reasoning/content. Пишет в _log_q
+    крупными кусками, а не по токену."""
+    state = {"kind": None, "buf": ""}
+
+    def emit(kind, chunk):
+        if kind != state["kind"]:
+            if state["buf"]:
+                _log_q.put(state["buf"])
+                state["buf"] = ""
+            state["kind"] = kind
+            state["buf"] = "💭 " if kind == "reasoning" else "🤖 "
+        state["buf"] += chunk
+        if len(state["buf"]) > 800 or "\n\n" in chunk or chunk.endswith("\n"):
+            _log_q.put(state["buf"])
+            state["buf"] = ""
+
+    def flush():
+        if state["buf"]:
+            _log_q.put(state["buf"])
+            state["buf"] = ""
+
+    return emit, flush
+
+
 def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
     status(f"🔗 provider={LLM_PROVIDER} {LLM_BASE_URL} model={LLM_MODEL}")
     log(f"prompt: {user_message}")
@@ -410,12 +440,15 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
     turn = 0
     try:
         for turn in range(1, MAX_TURNS + 1):
-            log(f"🔄 turn {turn}")
-            content, tool_calls, finish_reason, reasoning = call_llm(messages)
-            if reasoning:
-                log(f"turn {turn} 💭 {len(reasoning)}c\n{reasoning}")
-                if VERBOSE:
-                    print(f"\n💭 …{reasoning[-500:]}")
+            log(f"───── turn {turn} ─────")
+            emit, flush = _make_stream_logger(turn)
+            try:
+                content, tool_calls, finish_reason, reasoning = call_llm(
+                    messages, on_delta=emit)
+            finally:
+                flush()
+            if reasoning and VERBOSE:
+                print(f"\n💭 …{reasoning[-500:]}")
             log(f"turn {turn}: content={len(content)}c tools={len(tool_calls)} "
                 f"finish={finish_reason}")
             if finish_reason == "length":
@@ -455,6 +488,9 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                 save_result(last_content, "no output" if not last_content else "")
                 return 0
 
+            messages.append({"role": "assistant",
+                             "content": content or None,
+                             "tool_calls": tool_calls})
             for tc in tool_calls:
                 fn = tc["function"]["name"]
                 args = json.loads(tc["function"]["arguments"])
@@ -465,9 +501,6 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                 log(f"turn {turn} ← {fn} [{len(result)}c]\n{result}")
                 if VERBOSE:
                     print(f"   → {result[:500]}{'…' if len(result) > 500 else ''}")
-                messages.append({"role": "assistant",
-                                 "content": content or None,
-                                 "tool_calls": [tc]})
                 messages.append({"role": "tool", "tool_call_id": tc["id"],
                                  "content": _clip(result)})
 
@@ -493,9 +526,42 @@ def main() -> int:
                         help="Custom system prompt")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="Full details on stdout")
+    parser.add_argument("--provider", default=None,
+                        help="Override LLM_PROVIDER (label for 📄/🔗)")
+    parser.add_argument("--model", default=None,
+                        help="Override LLM_MODEL")
+    parser.add_argument("--base-url", default=None,
+                        help="Override LLM_BASE_URL")
+    parser.add_argument("--prompt-file", default=None,
+                        help="Read task from file (use - for stdin)")
+    parser.add_argument("--max-turns", type=int, default=None,
+                        help="Override MAX_TURNS")
+    parser.add_argument("--no-thinking", action="store_true",
+                        help="Force LLM_THINKING=off")
     args = parser.parse_args()
 
-    if not args.prompt:
+    global LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL, MAX_TURNS, LLM_THINKING
+    if args.provider:
+        LLM_PROVIDER = args.provider
+    if args.model:
+        LLM_MODEL = args.model
+    if args.base_url:
+        LLM_BASE_URL = args.base_url
+    if args.max_turns:
+        MAX_TURNS = args.max_turns
+    if args.no_thinking:
+        LLM_THINKING = "off"
+
+    if args.prompt_file:
+        if args.prompt_file == "-":
+            task_text = sys.stdin.read()
+        else:
+            with open(args.prompt_file, encoding="utf-8") as f:
+                task_text = f.read()
+    else:
+        task_text = args.prompt
+
+    if not task_text:
         print("No task provided. Exiting.", file=sys.stderr)
         return 1
 
@@ -503,7 +569,7 @@ def main() -> int:
     signal.signal(signal.SIGINT, _on_int)
     start_log()
     try:
-        return agent_loop(args.prompt,
+        return agent_loop(task_text,
                           system_prompt=args.system_prompt or SYSTEM_PROMPT)
     finally:
         stop_log()
