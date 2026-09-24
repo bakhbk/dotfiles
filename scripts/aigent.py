@@ -171,11 +171,27 @@ def status(msg: str) -> None:
     _log_q.put(msg)
 
 
+class _HeartbeatHandle:
+    """Хэндл для досрочной остановки heartbeat из кода."""
+
+    def __init__(self, stop_event: threading.Event, fired_ref: list):
+        self._stop = stop_event
+        self._fired = fired_ref
+
+    def stop(self) -> None:
+        if VERBOSE and self._fired[0]:
+            print("\r" + " " * 72 + "\r", end="", flush=True)
+            self._fired[0] = False
+        self._stop.set()
+
+
 @contextmanager
 def heartbeat(label: str, interval: int = 10):
     """Пока долгая операция (LLM/bash) идёт: строка в файл каждые N секунд,
     при -v — live-строка в stdout через \\r. Поток просыпается раз в секунду,
-    чтобы не задерживать завершение операции."""
+    чтобы не задерживать завершение операции.
+
+    Yield: _HeartbeatHandle — можно позвать .stop() досрочно."""
     stop = threading.Event()
     fired = [False]
 
@@ -195,7 +211,7 @@ def heartbeat(label: str, interval: int = 10):
     th = threading.Thread(target=tick, daemon=True)
     th.start()
     try:
-        yield
+        yield _HeartbeatHandle(stop, fired)
     finally:
         stop.set()
         th.join(timeout=5)
@@ -228,7 +244,7 @@ def _sse_log(raw_line: str, t0: float) -> None:
     _log_q.put(f"[sse +{el:6.2f}s] {s}")
 
 
-def _consume_stream(resp, on_delta=None):
+def _consume_stream(resp, on_delta=None, on_first_token=None):
     """Собирает (content, tool_calls, finish_reason, reasoning, stats) из SSE-чанков.
 
     Пинги релеи не считаются: если STREAM_STALL секунд нет полезных токенов —
@@ -275,6 +291,8 @@ def _consume_stream(resp, on_delta=None):
                 now = time.monotonic()
                 t_first = now
                 log(f"⏱ first token +{now - t0:.2f}s")
+                if on_first_token:
+                    on_first_token()
             if delta.get("reasoning_content"):
                 reasoning += delta["reasoning_content"]
                 if on_delta:
@@ -350,7 +368,7 @@ def call_llm(messages, on_delta=None):
             time.sleep(RETRY_DELAYS[attempt - 1])
         resp = None
         try:
-            with heartbeat("waiting for first token"):
+            with heartbeat("waiting for first token") as hb:
                 resp = requests.post(f"{LLM_BASE_URL}/chat/completions",
                                      json=payload, headers=LLM_HEADERS,
                                      timeout=LLM_TIMEOUT, stream=True)
@@ -359,7 +377,8 @@ def call_llm(messages, on_delta=None):
                                    retryable=True)
                 if resp.status_code >= 400:
                     raise LLMError(f"HTTP {resp.status_code}: {resp.text[:300]}")
-                return _consume_stream(resp, on_delta=on_delta)
+                return _consume_stream(resp, on_delta=on_delta,
+                                       on_first_token=hb.stop)
         except LLMError as e:
             last_err = str(e)
             if not e.retryable:
