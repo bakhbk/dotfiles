@@ -184,15 +184,37 @@ class LLMError(RuntimeError):
         self.retryable = retryable
 
 
+SSE_LOG_MAX = 500  # максимальная длина сырой строки SSE, попадающей в лог
+
+
+def _sse_log(raw_line: str, t0: float) -> None:
+    """При VERBOSE: писать каждую сырую SSE-строку в лог с таймстампом.
+    Длинные строки обрезаются. В stdout не идёт — только в файл."""
+    if not VERBOSE:
+        return
+    el = time.monotonic() - t0
+    s = raw_line.strip()
+    if len(s) > SSE_LOG_MAX:
+        s = s[:SSE_LOG_MAX] + f"… [+{len(s) - SSE_LOG_MAX}c]"
+    _log_q.put(f"[sse +{el:6.2f}s] {s}")
+
+
 def _consume_stream(resp, on_delta=None):
-    """Собирает (content, tool_calls, finish_reason, reasoning) из SSE-чанков.
+    """Собирает (content, tool_calls, finish_reason, reasoning, stats) из SSE-чанков.
 
     Пинги релеи не считаются: если STREAM_STALL секунд нет полезных токенов —
     генератор мертв (relay может держать сокет живым вечно), retryable-ошибка.
+    stats: {"ttft": s|None, "tps": tok/s|None, "dur": s,
+            "n_chunks": int, "usage": dict|None}
     """
     content, reasoning, finish = "", "", None
     tcs = {}  # index -> tool_call
+    t_first = None
+    t_last = None
+    n_chunks = 0
+    usage = None
     last_token = time.monotonic()
+    t0 = last_token
     with resp:
         for raw in resp.iter_lines():
             if time.monotonic() - last_token > STREAM_STALL:
@@ -203,6 +225,7 @@ def _consume_stream(resp, on_delta=None):
             line = raw.decode() if isinstance(raw, bytes) else raw
             if not line.startswith("data:"):
                 continue
+            _sse_log(line, t0)
             data = line[5:].strip()
             if data == "[DONE]":
                 break
@@ -210,11 +233,19 @@ def _consume_stream(resp, on_delta=None):
                 chunk = json.loads(data)
             except ValueError:
                 continue
+            if chunk.get("usage"):
+                usage = chunk["usage"]
             if not chunk.get("choices"):
                 continue
             ch = chunk["choices"][0]
             delta = ch.get("delta") or {}
             meaningful = False
+            # первый содержательный чанк — фиксируем TTFT ДО стрима в on_delta
+            if (delta.get("reasoning_content") or delta.get("content")
+                    or delta.get("tool_calls")) and t_first is None:
+                now = time.monotonic()
+                t_first = now
+                log(f"⏱ first token +{now - t0:.2f}s")
             if delta.get("reasoning_content"):
                 reasoning += delta["reasoning_content"]
                 if on_delta:
@@ -241,11 +272,25 @@ def _consume_stream(resp, on_delta=None):
                 finish = ch["finish_reason"]
                 meaningful = True
             if meaningful:
-                last_token = time.monotonic()
+                t_last = time.monotonic()
+                n_chunks += 1
+                last_token = t_last
+    dur = time.monotonic() - t0
+    ttft = (t_first - t0) if t_first is not None else None
+    gen_dur = (t_last - t_first) if (t_first and t_last and t_last > t_first) else 0.0
+    tps = ((n_chunks - 1) / gen_dur) if gen_dur > 0 else None
+    tps_usage = None
+    if usage:
+        ct = usage.get("completion_tokens")
+        if ct and gen_dur > 0:
+            tps_usage = ct / gen_dur
+    stats = {"ttft": ttft, "tps": tps, "tps_usage": tps_usage, "dur": dur,
+             "n_chunks": n_chunks, "usage": usage}
     return (content.strip(),
             [tcs[i] for i in sorted(tcs)],
             finish,
-            reasoning)
+            reasoning,
+            stats)
 
 
 def call_llm(messages, on_delta=None):
@@ -272,7 +317,7 @@ def call_llm(messages, on_delta=None):
             time.sleep(RETRY_DELAYS[attempt - 1])
         resp = None
         try:
-            with heartbeat("LLM call"):
+            with heartbeat("waiting for first token"):
                 resp = requests.post(f"{LLM_BASE_URL}/chat/completions",
                                      json=payload, headers=LLM_HEADERS,
                                      timeout=LLM_TIMEOUT, stream=True)
@@ -486,17 +531,35 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
 
     last_content = ""
     turn = 0
+    turns_stats = []
     try:
         for turn in range(1, MAX_TURNS + 1):
             log(f"───── turn {turn} ─────")
             emit, flush = _make_stream_logger(turn)
             try:
-                content, tool_calls, finish_reason, reasoning = call_llm(
+                content, tool_calls, finish_reason, reasoning, stats = call_llm(
                     messages, on_delta=emit)
             finally:
                 flush()
-            log(f"turn {turn}: content={len(content)}c tools={len(tool_calls)} "
-                f"finish={finish_reason}")
+            turns_stats.append(stats)
+            ttft = stats.get("ttft")
+            tps = stats.get("tps")
+            tps_usage = stats.get("tps_usage")
+            dur = stats.get("dur") or 0.0
+            ttft_s = f"{ttft:.2f}s" if ttft is not None else "-"
+            tps_s = f"{tps:.1f}" if tps is not None else "-"
+            tps_usage_s = f"/{tps_usage:.1f}u" if tps_usage is not None else ""
+            usage_note = ""
+            u = stats.get("usage")
+            if u:
+                pt = u.get("prompt_tokens")
+                ct = u.get("completion_tokens")
+                if pt is not None and ct is not None:
+                    usage_note = f" usage={pt}+{ct}"
+            status(f"turn {turn}: ttft={ttft_s} tps={tps_s}{tps_usage_s} "
+                   f"finish={finish_reason} content={len(content)}c "
+                   f"reasoning={len(reasoning)}c tools={len(tool_calls)} "
+                   f"dur={dur:.2f}s{usage_note}")
             if finish_reason == "length":
                 # Бюджет выгорел (типично для reasoning-моделей: think съел весь max_tokens).
                 # Дожимаем: просим продолжить, пока модель не закончит сама.
@@ -512,7 +575,7 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                     messages.append({"role": "user",
                                      "content": "Продолжи с места, где остановился. "
                                                 "Не повторяй уже написанное."})
-                    content, tool_calls, finish_reason, reasoning = call_llm(messages)
+                    content, tool_calls, finish_reason, reasoning, _stats = call_llm(messages)
                     log(f"turn {turn}: continuation {cont}: content={len(content)}c "
                         f"finish={finish_reason}")
                     full = (full or "") + (content or "")
@@ -528,7 +591,26 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                         print(f"\n{content}")
                 else:
                     status("⚠️ finished with empty answer")
-                status(f"✅ done in {turn} turns")
+                ttfts = [s["ttft"] for s in turns_stats if s["ttft"] is not None]
+                tpss = [s["tps"] for s in turns_stats if s["tps"] is not None]
+                tpsu = [s.get("tps_usage") for s in turns_stats if s.get("tps_usage")]
+                total_dur = sum((s.get("dur") or 0.0) for s in turns_stats)
+                parts = [f"✅ done in {turn} turns"]
+                if ttfts:
+                    parts.append(f"avg ttft={sum(ttfts) / len(ttfts):.2f}s")
+                if tpss:
+                    parts.append(f"avg tps={sum(tpss) / len(tpss):.1f}")
+                if tpsu:
+                    parts.append(f"avg tps_usage={sum(tpsu) / len(tpsu):.1f}")
+                parts.append(f"total dur={total_dur:.2f}s")
+                last_usage = turns_stats[-1].get("usage") if turns_stats else None
+                if last_usage:
+                    pt = last_usage.get("prompt_tokens")
+                    ct = last_usage.get("completion_tokens")
+                    if pt is not None and ct is not None:
+                        parts.append(f"usage={pt}+{ct}")
+                print(flush=True)
+                status(" — ".join(parts))
                 save_result(last_content, "no output" if not last_content else "")
                 return 0
 
