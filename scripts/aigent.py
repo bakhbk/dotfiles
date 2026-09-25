@@ -295,9 +295,10 @@ def _consume_stream(resp, on_delta=None, on_first_token=None):
 
     Loop-guard: если последние LOOP_PROBE символов reasoning или content
     встречаются >= LOOP_REPEAT раз в хвосте LOOP_WINDOW символов — стрим
-    обрывается, хвост LOOP_WINDOW символов отрезается, возвращается
-    finish="loop" (не "length" — семантика другая). Цифры нормализуются
-    в '#' (инкрементирующиеся счётчики не ломают детектор).
+    обрывается с finish="loop" (не "length" — семантика другая). Буфер не
+    обрезается: thinking-модель должна видеть свои рассуждения целиком,
+    иначе теряет контекст и зацикливается заново. Цифры нормализуются в '#'
+    (инкрементирующиеся счётчики не ломают детектор).
 
     stats: {"ttft": s|None, "tps": tok/s|None, "dur": s,
             "n_chunks": int, "usage": dict|None}
@@ -361,11 +362,7 @@ def _consume_stream(resp, on_delta=None, on_first_token=None):
                         if probe and window.count(probe) >= LOOP_REPEAT:
                             log(f"⚠️ {label} loop in stream "
                                 f"({LOOP_REPEAT}x{LOOP_PROBE}c in {LOOP_WINDOW}c), "
-                                f"trim {LOOP_WINDOW}c, forcing continuation")
-                            if label == "reasoning":
-                                reasoning = reasoning[:-LOOP_WINDOW]
-                            else:
-                                content = content[:-LOOP_WINDOW]
+                                f"forcing continuation")
                             finish = "loop"
                             break
                 if finish == "loop":
@@ -768,7 +765,8 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                     messages.append(am)
                     nudge = ("Продолжи с места, где остановился. Не повторяй уже написанное."
                              if reason == "length" else
-                             "Ты зациклился. Не повторяй уже сказанное — иди дальше другим путём.")
+                             "Ты повторяешься. Не продолжай ту же мысль — переходи "
+                             "к финальному ответу.")
                     messages.append({"role": "user", "content": nudge})
                     content, tool_calls, finish_reason, reasoning, _stats = call_llm(messages)
                     _merge_stats(stats, _stats)
