@@ -54,6 +54,7 @@ source ~/.dotfiles/commit.sh
 source ~/.dotfiles/fvm_tools.sh
 source ~/.dotfiles/ollama_fzf.sh
 source ~/.dotfiles/clean.sh
+source ~/.dotfiles/project_clean.sh
 if [ -f ~/work/.zshrc ]; then
   source ~/work/.zshrc
 fi

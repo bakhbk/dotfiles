@@ -22,6 +22,7 @@ CONFIGS=(
   shell/agent-runner.sh
   shell/zshenv
   shell/.zshrc
+  shell/project_clean.sh
   installers/install-oh-my-zsh.sh
   shell/shell_prompt
   git/git_checkout_branch.sh

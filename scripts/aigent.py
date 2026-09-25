@@ -21,6 +21,7 @@
 import argparse
 import base64
 import configparser
+import hashlib
 import json
 import os
 import queue
@@ -76,6 +77,8 @@ MAX_CONTINUES = 3                # сколько раз «дописывать�
 MAX_TOKENS = int(os.getenv("AIGENT_MAX_TOKENS", "32768"))  # бюджет вывода за вызов (think+ответ); поднять, если «may be incomplete»
 BASH_TIMEOUT = int(os.getenv("AIGENT_BASH_TIMEOUT", "120"))
 BASH_MAX_OUTPUT = int(os.getenv("AIGENT_BASH_MAX_OUTPUT", "262144"))  # жёсткий лимит stdout+stderr, байт
+LOOP_TIMEOUT = int(os.getenv("AIGENT_LOOP_TIMEOUT", "240"))  # сек без прогресса → форс-финал
+LOOP_POLL = 5                                                 # период опроса watchdog, сек
 LLM_TIMEOUT = (10, 300)          # (connect, read)
 STREAM_STALL = 180               # сек без полезных токенов в стриме = генератор умер
 RETRY_DELAYS = (3, 5, 10)        # 3 retry
@@ -621,6 +624,62 @@ def _merge_stats(a: dict, b: dict) -> dict:
     return a
 
 
+class LoopWatchdog:
+    """Следит за прогрессом агента по сигнатуре (tool_calls, content).
+
+    Паттерн из multiprocessing.pool._handle_workers + ApplyResult.wait:
+    отдельный поток ждёт Event.wait(timeout) и выставляет stuck_event,
+    если сигнатура не менялась LOOP_TIMEOUT сек. Состояние (messages,
+    tool-результаты) остаётся в родительском процессе — в отличие от
+    форка через multiprocessing.Process.
+    """
+    def __init__(self, timeout: float, poll: float = LOOP_POLL):
+        self.timeout = timeout
+        self.poll = poll
+        self.stuck_event = threading.Event()
+        self._sig = None
+        self._last_change = time.monotonic()
+        self._stop = threading.Event()
+        self._th = threading.Thread(target=self._watch, daemon=True)
+
+    def start(self):
+        self._th.start()
+
+    def stop(self):
+        self._stop.set()
+        self._th.join(timeout=5)
+
+    def touch(self, tool_calls, content):
+        sig = hashlib.md5(
+            (repr([(tc["function"]["name"], tc["function"]["arguments"])
+                   for tc in tool_calls])[:2000]
+             + (content or "")[:2000]).encode(),
+            usedforsecurity=False,
+        ).hexdigest()
+        if sig != self._sig:
+            self._sig = sig
+            self._last_change = time.monotonic()
+
+    def _watch(self):
+        while not self._stop.wait(self.poll):
+            if self.stuck_event.is_set():
+                return
+            if time.monotonic() - self._last_change > self.timeout:
+                self.stuck_event.set()
+                return
+
+    def reset(self):
+        """Сброс окна наблюдения после nudge. Перезапускает _watch."""
+        self._stop.set()
+        self._th.join(timeout=1)
+        self._sig = None
+        self._last_change = time.monotonic()
+        self.stuck_event.clear()
+        self._stop.clear()
+        self._th = threading.Thread(target=self._watch, daemon=True)
+        self._th.start()
+
+
 def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
     status(f"🔗 provider={LLM_PROVIDER} {LLM_BASE_URL} model={LLM_MODEL}")
     log(f"prompt: {user_message}")
@@ -635,10 +694,27 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                 {"role": "user", "content": user_content}]
 
     last_content = ""
+    watchdog = LoopWatchdog(timeout=LOOP_TIMEOUT)
+    watchdog.start()
+    watchdog.touch([], "")
+    nudged = False
     turn = 0
     turns_stats = []
     try:
         for turn in range(1, MAX_TURNS + 1):
+            if watchdog.stuck_event.is_set() and not nudged:
+                status("🔁 no progress → asking for final answer")
+                log("🔁 watchdog fired: injecting nudge")
+                messages.append({"role": "user",
+                                 "content": "No progress detected — you are repeating "
+                                            "steps. Stop calling tools and give your "
+                                            "final answer now."})
+                nudged = True
+                watchdog.reset()
+            elif watchdog.stuck_event.is_set() and nudged:
+                status("🔁 loop persists after nudge → abort")
+                save_result(last_content, "loop detected")
+                return 1
             log(f"───── turn {turn} ─────")
             emit, flush = _make_stream_logger(turn)
             try:
@@ -735,6 +811,7 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                     print(f"   → {result[:500]}{'…' if len(result) > 500 else ''}")
                 messages.append({"role": "tool", "tool_call_id": tc["id"],
                                  "content": _clip(result)})
+            watchdog.touch(tool_calls, content)
 
         status(f"⚠️ max turns ({MAX_TURNS}) reached")
         save_result(last_content, f"max turns reached ({MAX_TURNS})")
@@ -748,6 +825,8 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
         status(f"💥 {type(e).__name__}: {e}")
         save_result(last_content, f"error: {e}")
         return 1
+    finally:
+        watchdog.stop()
 
 
 def main() -> int:
