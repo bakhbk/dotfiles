@@ -79,6 +79,8 @@ BASH_TIMEOUT = int(os.getenv("AIGENT_BASH_TIMEOUT", "120"))
 BASH_MAX_OUTPUT = int(os.getenv("AIGENT_BASH_MAX_OUTPUT", "262144"))  # жёсткий лимит stdout+stderr, байт
 LOOP_TIMEOUT = int(os.getenv("AIGENT_LOOP_TIMEOUT", "240"))  # сек без прогресса → форс-финал
 LOOP_POLL = 5                                                 # период опроса watchdog, сек
+LOOP_TAIL = int(os.getenv("AIGENT_LOOP_TAIL", "160"))         # окно повтора reasoning, символов
+LOOP_REPEAT = int(os.getenv("AIGENT_LOOP_REPEAT", "3"))       # сколько подряд повторов → стоп
 LLM_TIMEOUT = (10, 300)          # (connect, read)
 STREAM_STALL = 180               # сек без полезных токенов в стриме = генератор умер
 RETRY_DELAYS = (3, 5, 10)        # 3 retry
@@ -335,6 +337,14 @@ def _consume_stream(resp, on_delta=None, on_first_token=None):
                 reasoning += delta["reasoning_content"]
                 if on_delta:
                     on_delta("reasoning", delta["reasoning_content"])
+                if len(reasoning) >= LOOP_TAIL * LOOP_REPEAT:
+                    probe = reasoning[-(LOOP_TAIL // 4):]
+                    window = reasoning[-(LOOP_TAIL * LOOP_REPEAT):]
+                    if probe and window.count(probe) >= LOOP_REPEAT:
+                        log(f"⚠️ reasoning loop in stream "
+                            f"({LOOP_REPEAT}x{LOOP_TAIL // 4}c), forcing continuation")
+                        finish = "length"
+                        break
                 meaningful = True
             if delta.get("content"):
                 content += delta["content"]
@@ -649,11 +659,12 @@ class LoopWatchdog:
         self._stop.set()
         self._th.join(timeout=5)
 
-    def touch(self, tool_calls, content):
+    def touch(self, tool_calls, content, reasoning=""):
         sig = hashlib.md5(
             (repr([(tc["function"]["name"], tc["function"]["arguments"])
                    for tc in tool_calls])[:2000]
-             + (content or "")[:2000]).encode(),
+             + (content or "")[:2000]
+             + (reasoning or "")[:2000]).encode(),
             usedforsecurity=False,
         ).hexdigest()
         if sig != self._sig:
@@ -707,8 +718,8 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                 log("🔁 watchdog fired: injecting nudge")
                 messages.append({"role": "user",
                                  "content": "No progress detected — you are repeating "
-                                            "steps. Stop calling tools and give your "
-                                            "final answer now."})
+                                            "the same reasoning. Stop the current line "
+                                            "and proceed to the next concrete step."})
                 nudged = True
                 watchdog.reset()
             elif watchdog.stuck_event.is_set() and nudged:
@@ -811,7 +822,7 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                     print(f"   → {result[:500]}{'…' if len(result) > 500 else ''}")
                 messages.append({"role": "tool", "tool_call_id": tc["id"],
                                  "content": _clip(result)})
-            watchdog.touch(tool_calls, content)
+            watchdog.touch(tool_calls, content, reasoning)
 
         status(f"⚠️ max turns ({MAX_TURNS}) reached")
         save_result(last_content, f"max turns reached ({MAX_TURNS})")
