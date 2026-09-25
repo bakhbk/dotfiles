@@ -1,17 +1,19 @@
-"""Unit-тесты для reasoning-loop детектора в _consume_stream.
+"""Unit-тесты для loop-детектора в _consume_stream.
 
-Проверяют три сценария:
-1. Периодический reasoning → детектор срабатывает (finish == "length").
-2. Уникальный reasoning → детектор молчит (finish is None).
-3. Короткий reasoning → детектор молчит (ниже порога LOOP_TAIL*LOOP_REPEAT).
+Детектор смотрит и на reasoning, и на content. Проверяются четыре сценария:
+1. Периодический поток с коротким периодом → срабатывает (finish == "length").
+2. Периодический поток с длинным периодом (bash-блок) → срабатывает.
+3. Уникальный текст → молчит (finish is None).
+4. Короткий текст (< LOOP_WINDOW) → молчит.
 """
 import json
 
 import aigent
 
 # Детерминированные значения, независимо от env
-aigent.LOOP_TAIL = 160
-aigent.LOOP_REPEAT = 3
+aigent.LOOP_WINDOW = 2000
+aigent.LOOP_PROBE = 100
+aigent.LOOP_REPEAT = 2
 
 
 class FakeResp:
@@ -46,7 +48,15 @@ def test_periodic_fires():
     assert finish == "length", (
         f"детектор не сработал: finish={finish}, len(reasoning)={len(reasoning)}"
     )
-    assert len(reasoning) < 1000, f"сработал слишком поздно: {len(reasoning)}c"
+    assert len(reasoning) < 2500, f"сработал слишком поздно: {len(reasoning)}c"
+
+
+def test_long_period_fires():
+    block = "mkdir -p /tmp/x\n" + ("echo line\n" * 30) + "cd /tmp/x\n"
+    text = block * 8
+    resp = _stream(text)
+    _, _, finish, _, _ = aigent._consume_stream(resp)
+    assert finish == "length", f"длинный период не пойман: finish={finish}"
 
 
 def test_unique_quiet():

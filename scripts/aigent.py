@@ -79,8 +79,9 @@ BASH_TIMEOUT = int(os.getenv("AIGENT_BASH_TIMEOUT", "120"))
 BASH_MAX_OUTPUT = int(os.getenv("AIGENT_BASH_MAX_OUTPUT", "262144"))  # жёсткий лимит stdout+stderr, байт
 LOOP_TIMEOUT = int(os.getenv("AIGENT_LOOP_TIMEOUT", "240"))  # сек без прогресса → форс-финал
 LOOP_POLL = 5                                                 # период опроса watchdog, сек
-LOOP_TAIL = int(os.getenv("AIGENT_LOOP_TAIL", "160"))         # окно повтора reasoning, символов
-LOOP_REPEAT = int(os.getenv("AIGENT_LOOP_REPEAT", "3"))       # сколько подряд повторов → стоп
+LOOP_WINDOW = int(os.getenv("AIGENT_LOOP_WINDOW", "2000"))    # хвост буфера для поиска повторов, символов
+LOOP_PROBE = int(os.getenv("AIGENT_LOOP_PROBE", "100"))       # probe = последние N символов буфера
+LOOP_REPEAT = int(os.getenv("AIGENT_LOOP_REPEAT", "2"))       # порог вхождений probe в окне → стоп
 LLM_TIMEOUT = (10, 300)          # (connect, read)
 STREAM_STALL = 180               # сек без полезных токенов в стриме = генератор умер
 RETRY_DELAYS = (3, 5, 10)        # 3 retry
@@ -289,6 +290,11 @@ def _consume_stream(resp, on_delta=None, on_first_token=None):
 
     Пинги релеи не считаются: если STREAM_STALL секунд нет полезных токенов —
     генератор мертв (relay может держать сокет живым вечно), retryable-ошибка.
+
+    Loop-guard: если последние LOOP_PROBE символов reasoning или content
+    встречаются >= LOOP_REPEAT раз в хвосте LOOP_WINDOW символов — стрим
+    обрывается с finish="length", модель уходит в continuation.
+
     stats: {"ttft": s|None, "tps": tok/s|None, "dur": s,
             "n_chunks": int, "usage": dict|None}
     """
@@ -337,20 +343,25 @@ def _consume_stream(resp, on_delta=None, on_first_token=None):
                 reasoning += delta["reasoning_content"]
                 if on_delta:
                     on_delta("reasoning", delta["reasoning_content"])
-                if len(reasoning) >= LOOP_TAIL * LOOP_REPEAT:
-                    probe = reasoning[-(LOOP_TAIL // 4):]
-                    window = reasoning[-(LOOP_TAIL * LOOP_REPEAT):]
-                    if probe and window.count(probe) >= LOOP_REPEAT:
-                        log(f"⚠️ reasoning loop in stream "
-                            f"({LOOP_REPEAT}x{LOOP_TAIL // 4}c), forcing continuation")
-                        finish = "length"
-                        break
                 meaningful = True
             if delta.get("content"):
                 content += delta["content"]
                 if on_delta:
                     on_delta("content", delta["content"])
                 meaningful = True
+            if meaningful:
+                for label, buf in (("reasoning", reasoning), ("content", content)):
+                    if len(buf) >= LOOP_WINDOW:
+                        probe = buf[-LOOP_PROBE:]
+                        window = buf[-LOOP_WINDOW:]
+                        if window.count(probe) >= LOOP_REPEAT:
+                            log(f"⚠️ {label} loop in stream "
+                                f"({LOOP_REPEAT}x{LOOP_PROBE}c in {LOOP_WINDOW}c), "
+                                f"forcing continuation")
+                            finish = "length"
+                            break
+                if finish == "length":
+                    break
             for d in delta.get("tool_calls") or []:
                 tc = tcs.setdefault(d.get("index", 0),
                                     {"id": "", "type": "function",
@@ -635,7 +646,7 @@ def _merge_stats(a: dict, b: dict) -> dict:
 
 
 class LoopWatchdog:
-    """Следит за прогрессом агента по сигнатуре (tool_calls, content).
+    """Следит за прогрессом агента по сигнатуре (tool_calls, content, reasoning).
 
     Паттерн из multiprocessing.pool._handle_workers + ApplyResult.wait:
     отдельный поток ждёт Event.wait(timeout) и выставляет stuck_event,
