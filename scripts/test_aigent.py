@@ -71,3 +71,20 @@ def test_short_quiet():
     resp = _stream(text)
     _, _, finish, _, _ = aigent._consume_stream(resp)
     assert finish is None, f"сработал на коротком вводе: finish={finish}"
+
+
+def test_counter_period_fires():
+    lines = [
+        "все требования задачи выполнены, манифест и промты готовы",
+        "финальный ответ: ✅ manifest.txt: 3 волн, 3 задач, score=100/100",
+        "задача завершена, декомпозиция выполнена",
+        "все файлы на месте, валидация пройдена, score 100/100",
+        "готово к исполнению агентами по волнам",
+    ]
+    text = "".join(
+        f"- **Примечание {i}**: {lines[i % len(lines)]}\n\n"
+        for i in range(1, 200)
+    )
+    resp = _stream(text)
+    _, _, finish, _, _ = aigent._consume_stream(resp)
+    assert finish == "length", f"инкремент-счётчик не пойман: finish={finish}"

@@ -82,6 +82,8 @@ LOOP_POLL = 5                                                 # период о�
 LOOP_WINDOW = int(os.getenv("AIGENT_LOOP_WINDOW", "2000"))    # хвост буфера для поиска повторов, символов
 LOOP_PROBE = int(os.getenv("AIGENT_LOOP_PROBE", "100"))       # probe = последние N символов буфера
 LOOP_REPEAT = int(os.getenv("AIGENT_LOOP_REPEAT", "2"))       # порог вхождений probe в окне → стоп
+LOOP_NORM = re.compile(r"\d+")                                 # инкремент-счётчики → '#'
+LLM_TIMEOUT = (10, 300)          # (connect, read)
 LLM_TIMEOUT = (10, 300)          # (connect, read)
 STREAM_STALL = 180               # сек без полезных токенов в стриме = генератор умер
 RETRY_DELAYS = (3, 5, 10)        # 3 retry
@@ -293,7 +295,8 @@ def _consume_stream(resp, on_delta=None, on_first_token=None):
 
     Loop-guard: если последние LOOP_PROBE символов reasoning или content
     встречаются >= LOOP_REPEAT раз в хвосте LOOP_WINDOW символов — стрим
-    обрывается с finish="length", модель уходит в continuation.
+    обрывается с finish="length", модель уходит в continuation. Цифры
+    нормализуются в '#' (инкрементирующиеся счётчики не ломают детектор).
 
     stats: {"ttft": s|None, "tps": tok/s|None, "dur": s,
             "n_chunks": int, "usage": dict|None}
@@ -352,9 +355,9 @@ def _consume_stream(resp, on_delta=None, on_first_token=None):
             if meaningful:
                 for label, buf in (("reasoning", reasoning), ("content", content)):
                     if len(buf) >= LOOP_WINDOW:
-                        probe = buf[-LOOP_PROBE:]
-                        window = buf[-LOOP_WINDOW:]
-                        if window.count(probe) >= LOOP_REPEAT:
+                        probe = LOOP_NORM.sub("#", buf[-LOOP_PROBE:])
+                        window = LOOP_NORM.sub("#", buf[-LOOP_WINDOW:])
+                        if probe and window.count(probe) >= LOOP_REPEAT:
                             log(f"⚠️ {label} loop in stream "
                                 f"({LOOP_REPEAT}x{LOOP_PROBE}c in {LOOP_WINDOW}c), "
                                 f"forcing continuation")
