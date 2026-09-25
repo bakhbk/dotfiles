@@ -42,7 +42,7 @@ import requests
 
 PROVIDERS_CONF = os.path.expanduser(
     os.getenv("DISPATCH_PROVIDERS_CONF", "~/.config/dispatch/providers.conf"))
-LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:8080/v1")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:18080/v1")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "none")
 
 
