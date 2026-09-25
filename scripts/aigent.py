@@ -295,8 +295,9 @@ def _consume_stream(resp, on_delta=None, on_first_token=None):
 
     Loop-guard: если последние LOOP_PROBE символов reasoning или content
     встречаются >= LOOP_REPEAT раз в хвосте LOOP_WINDOW символов — стрим
-    обрывается с finish="length", модель уходит в continuation. Цифры
-    нормализуются в '#' (инкрементирующиеся счётчики не ломают детектор).
+    обрывается, хвост LOOP_WINDOW символов отрезается, возвращается
+    finish="loop" (не "length" — семантика другая). Цифры нормализуются
+    в '#' (инкрементирующиеся счётчики не ломают детектор).
 
     stats: {"ttft": s|None, "tps": tok/s|None, "dur": s,
             "n_chunks": int, "usage": dict|None}
@@ -360,10 +361,14 @@ def _consume_stream(resp, on_delta=None, on_first_token=None):
                         if probe and window.count(probe) >= LOOP_REPEAT:
                             log(f"⚠️ {label} loop in stream "
                                 f"({LOOP_REPEAT}x{LOOP_PROBE}c in {LOOP_WINDOW}c), "
-                                f"forcing continuation")
-                            finish = "length"
+                                f"trim {LOOP_WINDOW}c, forcing continuation")
+                            if label == "reasoning":
+                                reasoning = reasoning[:-LOOP_WINDOW]
+                            else:
+                                content = content[:-LOOP_WINDOW]
+                            finish = "loop"
                             break
-                if finish == "length":
+                if finish == "loop":
                     break
             for d in delta.get("tool_calls") or []:
                 tc = tcs.setdefault(d.get("index", 0),
@@ -747,29 +752,32 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                     messages, on_delta=emit)
             finally:
                 flush()
-            if finish_reason == "length":
-                # Бюджет выгорел (типично для reasoning-моделей: think съел весь max_tokens).
-                # Дожимаем: просим продолжить, пока модель не закончит сама.
+            if finish_reason in ("length", "loop"):
+                # "length": модель не уложилась в max_tokens — просим продолжить.
+                # "loop": loop-guard обрезал хвост с петлёй — просим
+                #         переформулировать застрявшую линию, не возвращаясь назад.
                 full = content
                 cont = 0
-                while finish_reason == "length" and cont < MAX_CONTINUES:
+                while finish_reason in ("length", "loop") and cont < MAX_CONTINUES:
                     cont += 1
-                    log(f"turn {turn}: finish=length → continuation {cont}/{MAX_CONTINUES}")
+                    reason = finish_reason
+                    log(f"turn {turn}: finish={reason} → continuation {cont}/{MAX_CONTINUES}")
                     am = {"role": "assistant", "content": content}
                     if reasoning:
                         am["reasoning_content"] = reasoning
                     messages.append(am)
-                    messages.append({"role": "user",
-                                     "content": "Продолжи с места, где остановился. "
-                                                "Не повторяй уже написанное."})
+                    nudge = ("Продолжи с места, где остановился. Не повторяй уже написанное."
+                             if reason == "length" else
+                             "Ты зациклился. Не повторяй уже сказанное — иди дальше другим путём.")
+                    messages.append({"role": "user", "content": nudge})
                     content, tool_calls, finish_reason, reasoning, _stats = call_llm(messages)
                     _merge_stats(stats, _stats)
                     log(f"turn {turn}: continuation {cont}: content={len(content)}c "
                         f"finish={finish_reason}")
                     full = (full or "") + (content or "")
                 content = full
-                if finish_reason == "length":
-                    log("⚠️ answer may be incomplete (still truncated after continuations)")
+                if finish_reason in ("length", "loop"):
+                    log(f"⚠️ answer may be incomplete (still {finish_reason} after continuations)")
             turns_stats.append(stats)
             ttft = stats.get("ttft")
             tps = stats.get("tps")

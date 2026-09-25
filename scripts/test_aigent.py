@@ -45,7 +45,7 @@ def test_periodic_fires():
     text = phrase * 40
     resp = _stream(text)
     _, _, finish, reasoning, _ = aigent._consume_stream(resp)
-    assert finish == "length", (
+    assert finish == "loop", (
         f"детектор не сработал: finish={finish}, len(reasoning)={len(reasoning)}"
     )
     assert len(reasoning) < 2500, f"сработал слишком поздно: {len(reasoning)}c"
@@ -56,7 +56,7 @@ def test_long_period_fires():
     text = block * 8
     resp = _stream(text)
     _, _, finish, _, _ = aigent._consume_stream(resp)
-    assert finish == "length", f"длинный период не пойман: finish={finish}"
+    assert finish == "loop", f"длинный период не пойман: finish={finish}"
 
 
 def test_unique_quiet():
@@ -86,5 +86,8 @@ def test_counter_period_fires():
         for i in range(1, 200)
     )
     resp = _stream(text)
-    _, _, finish, _, _ = aigent._consume_stream(resp)
-    assert finish == "length", f"инкремент-счётчик не пойман: finish={finish}"
+    _, _, finish, reasoning, _ = aigent._consume_stream(resp)
+    assert finish == "loop", f"инкремент-счётчик не пойман: finish={finish}"
+    assert len(reasoning) < len(text) - aigent.LOOP_WINDOW, (
+        f"буфер не обрезан: {len(reasoning)} >= {len(text) - aigent.LOOP_WINDOW}"
+    )
