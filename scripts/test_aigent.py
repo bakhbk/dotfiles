@@ -10,10 +10,8 @@ import json
 
 import aigent
 
-# Детерминированные значения, независимо от env
-aigent.LOOP_WINDOW = 2000
-aigent.LOOP_PROBE = 100
-aigent.LOOP_REPEAT = 2
+def _guard():
+    return aigent.LoopGuard(enabled=True, window=2000, probe=100, repeat=2)
 
 
 class FakeResp:
@@ -44,7 +42,7 @@ def test_periodic_fires():
     phrase = "One detail: I need to check if validate_manifest.py is available.\n"
     text = phrase * 40
     resp = _stream(text)
-    _, _, finish, reasoning, _ = aigent._consume_stream(resp)
+    _, _, finish, reasoning, _ = aigent._consume_stream(resp, guard=_guard())
     assert finish == "loop", (
         f"детектор не сработал: finish={finish}, len(reasoning)={len(reasoning)}"
     )
@@ -55,21 +53,21 @@ def test_long_period_fires():
     block = "mkdir -p /tmp/x\n" + ("echo line\n" * 30) + "cd /tmp/x\n"
     text = block * 8
     resp = _stream(text)
-    _, _, finish, _, _ = aigent._consume_stream(resp)
+    _, _, finish, _, _ = aigent._consume_stream(resp, guard=_guard())
     assert finish == "loop", f"длинный период не пойман: finish={finish}"
 
 
 def test_unique_quiet():
     text = "".join(f"unique-{i:04d}-line\n" for i in range(100))
     resp = _stream(text)
-    _, _, finish, _, _ = aigent._consume_stream(resp)
+    _, _, finish, _, _ = aigent._consume_stream(resp, guard=_guard())
     assert finish is None, f"ложное срабатывание: finish={finish}"
 
 
 def test_short_quiet():
     text = "short reasoning without any repetition at all."
     resp = _stream(text)
-    _, _, finish, _, _ = aigent._consume_stream(resp)
+    _, _, finish, _, _ = aigent._consume_stream(resp, guard=_guard())
     assert finish is None, f"сработал на коротком вводе: finish={finish}"
 
 
@@ -86,7 +84,7 @@ def test_counter_period_fires():
         for i in range(1, 200)
     )
     resp = _stream(text)
-    _, _, finish, reasoning, _ = aigent._consume_stream(resp)
+    _, _, finish, reasoning, _ = aigent._consume_stream(resp, guard=_guard())
     assert finish == "loop", f"инкремент-счётчик не пойман: finish={finish}"
     assert len(reasoning) < len(text) - aigent.LOOP_WINDOW, (
         f"буфер не обрезан: {len(reasoning)} >= {len(text) - aigent.LOOP_WINDOW}"

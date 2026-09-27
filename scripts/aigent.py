@@ -15,6 +15,8 @@
 - Всё действие асинхронно пишется в $AIGENT_DIR/<ts>-<id>.log (по умолчанию
   ~/.local/state/aigent), путь печатается в stdout на старте.
 - Ошибки API: retry x3 (паузы 3/5/10s) на network/429/5xx, 4xx — сразу ошибка.
+- Loop-защита включена по умолчанию. Отключение: --no-loop-guard
+  или AIGENT_LOOP_GUARD=off.
 - Exit code: 0 = успех, 1 = ошибка/макс. turn'ов, 130 = Ctrl-C.
 """
 
@@ -83,6 +85,7 @@ LOOP_WINDOW = int(os.getenv("AIGENT_LOOP_WINDOW", "2000"))    # хвост бу�
 LOOP_PROBE = int(os.getenv("AIGENT_LOOP_PROBE", "100"))       # probe = последние N символов буфера
 LOOP_REPEAT = int(os.getenv("AIGENT_LOOP_REPEAT", "2"))       # порог вхождений probe в окне → стоп
 LOOP_NORM = re.compile(r"\d+")                                 # инкремент-счётчики → '#'
+LOOP_GUARD_ENABLED = os.getenv("AIGENT_LOOP_GUARD", "on").lower() != "off"  # глобальный выключатель
 LLM_TIMEOUT = (10, 300)          # (connect, read)
 LLM_TIMEOUT = (10, 300)          # (connect, read)
 STREAM_STALL = 180               # сек без полезных токенов в стриме = генератор умер
@@ -287,7 +290,7 @@ def _sse_log(raw_line: str, t0: float) -> None:
     _log_q.put(f"[sse +{el:6.2f}s] {s}")
 
 
-def _consume_stream(resp, on_delta=None, on_first_token=None):
+def _consume_stream(resp, on_delta=None, on_first_token=None, guard=None):
     """Собирает (content, tool_calls, finish_reason, reasoning, stats) из SSE-чанков.
 
     Пинги релеи не считаются: если STREAM_STALL секунд нет полезных токенов —
@@ -345,27 +348,24 @@ def _consume_stream(resp, on_delta=None, on_first_token=None):
                     on_first_token()
                 log(f"⏱ first token +{now - t0:.2f}s")
             if delta.get("reasoning_content"):
-                reasoning += delta["reasoning_content"]
+                rchunk = delta["reasoning_content"]
+                reasoning += rchunk
                 if on_delta:
-                    on_delta("reasoning", delta["reasoning_content"])
+                    on_delta("reasoning", rchunk)
                 meaningful = True
+                if guard is not None and guard.feed("reasoning", rchunk):
+                    log("⚠️ reasoning loop in stream, forcing continuation")
+                    finish = "loop"
+                    break
             if delta.get("content"):
-                content += delta["content"]
+                cchunk = delta["content"]
+                content += cchunk
                 if on_delta:
-                    on_delta("content", delta["content"])
+                    on_delta("content", cchunk)
                 meaningful = True
-            if meaningful:
-                for label, buf in (("reasoning", reasoning), ("content", content)):
-                    if len(buf) >= LOOP_WINDOW:
-                        probe = LOOP_NORM.sub("#", buf[-LOOP_PROBE:])
-                        window = LOOP_NORM.sub("#", buf[-LOOP_WINDOW:])
-                        if probe and window.count(probe) >= LOOP_REPEAT:
-                            log(f"⚠️ {label} loop in stream "
-                                f"({LOOP_REPEAT}x{LOOP_PROBE}c in {LOOP_WINDOW}c), "
-                                f"forcing continuation")
-                            finish = "loop"
-                            break
-                if finish == "loop":
+                if guard is not None and guard.feed("content", cchunk):
+                    log("⚠️ content loop in stream, forcing continuation")
+                    finish = "loop"
                     break
             for d in delta.get("tool_calls") or []:
                 tc = tcs.setdefault(d.get("index", 0),
@@ -406,7 +406,7 @@ def _consume_stream(resp, on_delta=None, on_first_token=None):
             stats)
 
 
-def call_llm(messages, on_delta=None):
+def call_llm(messages, on_delta=None, guard=None):
     """POST /chat/completions (stream). Возвращает (content, tool_calls, finish_reason, reasoning).
 
     Retry x3 (3/5/10s) на сетевые ошибки, 429, 5xx. 4xx — сразу LLMError.
@@ -445,7 +445,7 @@ def call_llm(messages, on_delta=None):
                 if resp.status_code >= 400:
                     raise LLMError(f"HTTP {resp.status_code}: {resp.text[:300]}")
                 return _consume_stream(resp, on_delta=on_delta,
-                                       on_first_token=hb.stop)
+                                       on_first_token=hb.stop, guard=guard)
         except LLMError as e:
             last_err = str(e)
             if not e.retryable:
@@ -650,32 +650,68 @@ def _merge_stats(a: dict, b: dict) -> dict:
     return a
 
 
-class LoopWatchdog:
-    """Следит за прогрессом агента по сигнатуре (tool_calls, content, reasoning).
+class LoopGuard:
+    """Порт loop-защиты: стрим-детектор + watchdog уровня turn.
 
-    Паттерн из multiprocessing.pool._handle_workers + ApplyResult.wait:
-    отдельный поток ждёт Event.wait(timeout) и выставляет stuck_event,
-    если сигнатура не менялась LOOP_TIMEOUT сек. Состояние (messages,
-    tool-результаты) остаётся в родительском процессе — в отличие от
-    форка через multiprocessing.Process.
+    Единственная точка управления. enabled=False → все методы no-op,
+    буферы не аккумулируются, watchdog не стартует, stuck всегда False.
+
+    Стрим-детектор: feed(label, chunk) копит последние window символов
+    reasoning/content и возвращает True, если probe (хвост из probe
+    символов с нормализованными цифрами) встречается >= repeat раз в
+    окне. Тогда _consume_stream ставит finish="loop" и выходит из стрима.
+
+    Watchdog: поток ждёт poll сек, выставляет stuck, если сигнатура
+    (tool_calls, content, reasoning) не менялась watchdog_timeout сек.
     """
-    def __init__(self, timeout: float, poll: float = LOOP_POLL):
-        self.timeout = timeout
-        self.poll = poll
-        self.stuck_event = threading.Event()
+    def __init__(self, enabled=True, window=None, probe=None, repeat=None,
+                 watchdog_timeout=None, poll=None):
+        self.enabled = enabled
+        self.window = window if window is not None else LOOP_WINDOW
+        self.probe = probe if probe is not None else LOOP_PROBE
+        self.repeat = repeat if repeat is not None else LOOP_REPEAT
+        self.watchdog_timeout = (watchdog_timeout if watchdog_timeout is not None
+                                 else LOOP_TIMEOUT)
+        self.poll = poll if poll is not None else LOOP_POLL
+        self._rbuf = ""
+        self._cbuf = ""
+        self._stuck = threading.Event()
         self._sig = None
         self._last_change = time.monotonic()
         self._stop = threading.Event()
-        self._th = threading.Thread(target=self._watch, daemon=True)
+        self._th = None
+
+    def feed(self, label, chunk):
+        """True → зацикливание в стриме (reasoning или content)."""
+        if not self.enabled:
+            return False
+        if label == "reasoning":
+            self._rbuf = (self._rbuf + chunk)[-self.window:]
+            buf = self._rbuf
+        else:
+            self._cbuf = (self._cbuf + chunk)[-self.window:]
+            buf = self._cbuf
+        if len(buf) < self.window:
+            return False
+        probe = LOOP_NORM.sub("#", buf[-self.probe:])
+        window = LOOP_NORM.sub("#", buf)
+        return bool(probe) and window.count(probe) >= self.repeat
 
     def start(self):
+        if not self.enabled:
+            return
+        self._th = threading.Thread(target=self._watch, daemon=True)
         self._th.start()
 
     def stop(self):
+        if not self.enabled or self._th is None:
+            return
         self._stop.set()
         self._th.join(timeout=5)
 
     def touch(self, tool_calls, content, reasoning=""):
+        if not self.enabled:
+            return
         sig = hashlib.md5(
             (repr([(tc["function"]["name"], tc["function"]["arguments"])
                    for tc in tool_calls])[:2000]
@@ -687,24 +723,40 @@ class LoopWatchdog:
             self._sig = sig
             self._last_change = time.monotonic()
 
-    def _watch(self):
-        while not self._stop.wait(self.poll):
-            if self.stuck_event.is_set():
-                return
-            if time.monotonic() - self._last_change > self.timeout:
-                self.stuck_event.set()
-                return
-
     def reset(self):
         """Сброс окна наблюдения после nudge. Перезапускает _watch."""
+        if not self.enabled:
+            return
         self._stop.set()
-        self._th.join(timeout=1)
+        if self._th is not None:
+            self._th.join(timeout=1)
         self._sig = None
         self._last_change = time.monotonic()
-        self.stuck_event.clear()
+        self._stuck.clear()
         self._stop.clear()
         self._th = threading.Thread(target=self._watch, daemon=True)
         self._th.start()
+
+    def _watch(self):
+        while not self._stop.wait(self.poll):
+            if self._stuck.is_set():
+                return
+            if time.monotonic() - self._last_change > self.watchdog_timeout:
+                self._stuck.set()
+                return
+
+    @property
+    def stuck(self):
+        return self.enabled and self._stuck.is_set()
+
+    def nudge(self, finish_reason):
+        if finish_reason == "loop":
+            return ("Ты повторяешься. Не продолжай ту же мысль — "
+                    "переходи к финальному ответу.")
+        if finish_reason == "length":
+            return ("Продолжи с места, где остановился. "
+                    "Не повторяй уже написанное.")
+        return ""
 
 
 def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
@@ -721,15 +773,15 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                 {"role": "user", "content": user_content}]
 
     last_content = ""
-    watchdog = LoopWatchdog(timeout=LOOP_TIMEOUT)
-    watchdog.start()
-    watchdog.touch([], "")
+    guard = LoopGuard(enabled=LOOP_GUARD_ENABLED)
+    guard.start()
+    guard.touch([], "")
     nudged = False
     turn = 0
     turns_stats = []
     try:
         for turn in range(1, MAX_TURNS + 1):
-            if watchdog.stuck_event.is_set() and not nudged:
+            if guard.stuck and not nudged:
                 status("🔁 no progress → asking for final answer")
                 log("🔁 watchdog fired: injecting nudge")
                 messages.append({"role": "user",
@@ -737,8 +789,8 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                                             "the same reasoning. Stop the current line "
                                             "and proceed to the next concrete step."})
                 nudged = True
-                watchdog.reset()
-            elif watchdog.stuck_event.is_set() and nudged:
+                guard.reset()
+            elif guard.stuck and nudged:
                 status("🔁 loop persists after nudge → abort")
                 save_result(last_content, "loop detected")
                 return 1
@@ -746,7 +798,7 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
             emit, flush = _make_stream_logger(turn)
             try:
                 content, tool_calls, finish_reason, reasoning, stats = call_llm(
-                    messages, on_delta=emit)
+                    messages, on_delta=emit, guard=guard)
             finally:
                 flush()
             if finish_reason in ("length", "loop"):
@@ -763,12 +815,9 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                     if reasoning:
                         am["reasoning_content"] = reasoning
                     messages.append(am)
-                    nudge = ("Продолжи с места, где остановился. Не повторяй уже написанное."
-                             if reason == "length" else
-                             "Ты повторяешься. Не продолжай ту же мысль — переходи "
-                             "к финальному ответу.")
-                    messages.append({"role": "user", "content": nudge})
-                    content, tool_calls, finish_reason, reasoning, _stats = call_llm(messages)
+                    messages.append({"role": "user", "content": guard.nudge(reason)})
+                    content, tool_calls, finish_reason, reasoning, _stats = call_llm(
+                        messages, guard=guard)
                     _merge_stats(stats, _stats)
                     log(f"turn {turn}: continuation {cont}: content={len(content)}c "
                         f"finish={finish_reason}")
@@ -842,7 +891,7 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                     print(f"   → {result[:500]}{'…' if len(result) > 500 else ''}")
                 messages.append({"role": "tool", "tool_call_id": tc["id"],
                                  "content": _clip(result)})
-            watchdog.touch(tool_calls, content, reasoning)
+            guard.touch(tool_calls, content, reasoning)
 
         status(f"⚠️ max turns ({MAX_TURNS}) reached")
         save_result(last_content, f"max turns reached ({MAX_TURNS})")
@@ -857,11 +906,11 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
         save_result(last_content, f"error: {e}")
         return 1
     finally:
-        watchdog.stop()
+        guard.stop()
 
 
 def main() -> int:
-    global VERBOSE, QUIET, NO_USAGE, NO_TOOLS, LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL, LLM_API_KEY, MAX_TURNS, MAX_TOKENS, LLM_THINKING
+    global VERBOSE, QUIET, NO_USAGE, NO_TOOLS, LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL, LLM_API_KEY, MAX_TURNS, MAX_TOKENS, LLM_THINKING, LOOP_GUARD_ENABLED
     parser = argparse.ArgumentParser(description="LLM coding agent (v2)")
     parser.add_argument("prompt", nargs="?", help="Task description")
     parser.add_argument("-s", "--system-prompt", default=None,
@@ -891,6 +940,8 @@ def main() -> int:
                         help=f"Override MAX_TOKENS (default: {MAX_TOKENS})")
     parser.add_argument("--no-thinking", action="store_true",
                         help="Force LLM_THINKING=off")
+    parser.add_argument("--no-loop-guard", action="store_true",
+                        help="Disable loop-guard and watchdog entirely")
     parser.add_argument("--cwd", default=None,
                         help="Working directory for bash tool (default: current)")
     args = parser.parse_args()
@@ -907,6 +958,8 @@ def main() -> int:
         MAX_TOKENS = args.max_tokens
     if args.no_thinking:
         LLM_THINKING = "off"
+    if args.no_loop_guard:
+        LOOP_GUARD_ENABLED = False
     if args.cwd:
         cwd = os.path.expanduser(args.cwd)
         if not os.path.isdir(cwd):
