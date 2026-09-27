@@ -803,8 +803,8 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                 flush()
             if finish_reason in ("length", "loop"):
                 # "length": модель не уложилась в max_tokens — просим продолжить.
-                # "loop": loop-guard обрезал хвост с петлёй — просим
-                #         переформулировать застрявшую линию, не возвращаясь назад.
+                # "loop": loop-guard поймал петлю в стриме — просим модель
+                #         не продолжать ту же мысль, перейти к финальному ответу.
                 full = content
                 cont = 0
                 while finish_reason in ("length", "loop") and cont < MAX_CONTINUES:
@@ -876,16 +876,22 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                 # пустой финальный ответ
                 if not _empty_nudged:
                     status("⚠️ empty answer, retrying once with nudge")
-                    messages.append({"role": "user",
-                                     "content": "Ты не дал результата. Продолжи "
-                                                "работу: запиши все нужные файлы "
-                                                "через свои инструменты (bash, "
-                                                "Write), затем верни короткий "
-                                                "отчёт одной строкой."})
+                    if messages and messages[-1].get("role") == "user":
+                        messages.append({"role": "assistant", "content": ""})
+                    if NO_TOOLS:
+                        nudge = ("Ты не дал ответа. Верни финальный ответ "
+                                 "текстом строго по формату из промпта.")
+                    else:
+                        nudge = ("Продолжи работу: выполни оставшиеся шаги "
+                                 "через инструменты (bash), затем верни "
+                                 "короткий финальный отчёт.")
+                    messages.append({"role": "user", "content": nudge})
                     _empty_nudged = True
                     continue
                 status("⚠️ finished with empty answer")
-                save_result(last_content, "empty answer")
+                reason = ("empty answer" if not last_content
+                          else "empty answer after nudge")
+                save_result(last_content, reason)
                 return 3
 
             messages.append({"role": "assistant",
