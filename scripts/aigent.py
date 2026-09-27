@@ -87,7 +87,6 @@ LOOP_REPEAT = int(os.getenv("AIGENT_LOOP_REPEAT", "2"))       # порог вх�
 LOOP_NORM = re.compile(r"\d+")                                 # инкремент-счётчики → '#'
 LOOP_GUARD_ENABLED = os.getenv("AIGENT_LOOP_GUARD", "on").lower() != "off"  # глобальный выключатель
 LLM_TIMEOUT = (10, 300)          # (connect, read)
-LLM_TIMEOUT = (10, 300)          # (connect, read)
 STREAM_STALL = 180               # сек без полезных токенов в стриме = генератор умер
 RETRY_DELAYS = (3, 5, 10)        # 3 retry
 MAX_TOOL_RESULT = 16_000         # обрезка tool-результата при отправке в LLM

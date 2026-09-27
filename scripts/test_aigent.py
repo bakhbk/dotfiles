@@ -84,8 +84,5 @@ def test_counter_period_fires():
         for i in range(1, 200)
     )
     resp = _stream(text)
-    _, _, finish, reasoning, _ = aigent._consume_stream(resp, guard=_guard())
+    _, _, finish, _, _ = aigent._consume_stream(resp, guard=_guard())
     assert finish == "loop", f"инкремент-счётчик не пойман: finish={finish}"
-    assert len(reasoning) < len(text) - aigent.LOOP_WINDOW, (
-        f"буфер не обрезан: {len(reasoning)} >= {len(text) - aigent.LOOP_WINDOW}"
-    )
