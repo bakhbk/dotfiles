@@ -877,9 +877,11 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                 if not _empty_nudged:
                     status("⚠️ empty answer, retrying once with nudge")
                     messages.append({"role": "user",
-                                     "content": "Ты не дал финального ответа. "
-                                                "Сформулируй результат текстом "
-                                                "без tool_call."})
+                                     "content": "Ты не дал результата. Продолжи "
+                                                "работу: запиши все нужные файлы "
+                                                "через свои инструменты (bash, "
+                                                "Write), затем верни короткий "
+                                                "отчёт одной строкой."})
                     _empty_nudged = True
                     continue
                 status("⚠️ finished with empty answer")
