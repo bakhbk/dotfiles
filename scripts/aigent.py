@@ -1026,4 +1026,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print("\n⛔ interrupted", file=sys.stderr)
+        sys.exit(130)
