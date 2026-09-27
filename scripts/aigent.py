@@ -17,7 +17,7 @@
 - Ошибки API: retry x3 (паузы 3/5/10s) на network/429/5xx, 4xx — сразу ошибка.
 - Loop-защита включена по умолчанию. Отключение: --no-loop-guard
   или AIGENT_LOOP_GUARD=off.
-- Exit code: 0 = успех, 1 = ошибка/макс. turn'ов, 130 = Ctrl-C.
+- Exit code: 0 = успех, 1 = ошибка/макс. turn'ов, 3 = пустой ответ LLM, 130 = Ctrl-C.
 """
 
 import argparse
@@ -776,6 +776,7 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
     guard.start()
     guard.touch([], "")
     nudged = False
+    _empty_nudged = False
     turn = 0
     turns_stats = []
     try:
@@ -850,30 +851,40 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                 if content:
                     if not VERBOSE:
                         print(f"\n{content}")
-                else:
-                    status("⚠️ finished with empty answer")
-                ttfts = [s["ttft"] for s in turns_stats if s["ttft"] is not None]
-                tpss = [s["tps"] for s in turns_stats if s["tps"] is not None]
-                tpsu = [s.get("tps_usage") for s in turns_stats if s.get("tps_usage")]
-                total_dur = sum((s.get("dur") or 0.0) for s in turns_stats)
-                parts = [f"✅ done in {turn} turns"]
-                if ttfts:
-                    parts.append(f"avg ttft={sum(ttfts) / len(ttfts):.2f}s")
-                if tpss:
-                    parts.append(f"avg tps={sum(tpss) / len(tpss):.1f}")
-                if tpsu:
-                    parts.append(f"avg tps_usage={sum(tpsu) / len(tpsu):.1f}")
-                parts.append(f"total dur={total_dur:.2f}s")
-                last_usage = turns_stats[-1].get("usage") if turns_stats else None
-                if last_usage:
-                    pt = last_usage.get("prompt_tokens")
-                    ct = last_usage.get("completion_tokens")
-                    if pt is not None and ct is not None:
-                        parts.append(f"usage={pt}+{ct}")
-                print(flush=True)
-                status(" — ".join(parts))
-                save_result(last_content, "no output" if not last_content else "")
-                return 0
+                    ttfts = [s["ttft"] for s in turns_stats if s["ttft"] is not None]
+                    tpss = [s["tps"] for s in turns_stats if s["tps"] is not None]
+                    tpsu = [s.get("tps_usage") for s in turns_stats if s.get("tps_usage")]
+                    total_dur = sum((s.get("dur") or 0.0) for s in turns_stats)
+                    parts = [f"✅ done in {turn} turns"]
+                    if ttfts:
+                        parts.append(f"avg ttft={sum(ttfts) / len(ttfts):.2f}s")
+                    if tpss:
+                        parts.append(f"avg tps={sum(tpss) / len(tpss):.1f}")
+                    if tpsu:
+                        parts.append(f"avg tps_usage={sum(tpsu) / len(tpsu):.1f}")
+                    parts.append(f"total dur={total_dur:.2f}s")
+                    last_usage = turns_stats[-1].get("usage") if turns_stats else None
+                    if last_usage:
+                        pt = last_usage.get("prompt_tokens")
+                        ct = last_usage.get("completion_tokens")
+                        if pt is not None and ct is not None:
+                            parts.append(f"usage={pt}+{ct}")
+                    print(flush=True)
+                    status(" — ".join(parts))
+                    save_result(last_content, "no output" if not last_content else "")
+                    return 0
+                # пустой финальный ответ
+                if not _empty_nudged:
+                    status("⚠️ empty answer, retrying once with nudge")
+                    messages.append({"role": "user",
+                                     "content": "Ты не дал финального ответа. "
+                                                "Сформулируй результат текстом "
+                                                "без tool_call."})
+                    _empty_nudged = True
+                    continue
+                status("⚠️ finished with empty answer")
+                save_result(last_content, "empty answer")
+                return 3
 
             messages.append({"role": "assistant",
                              "content": content or None,

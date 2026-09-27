@@ -86,3 +86,16 @@ def test_counter_period_fires():
     resp = _stream(text)
     _, _, finish, _, _ = aigent._consume_stream(resp, guard=_guard())
     assert finish == "loop", f"инкремент-счётчик не пойман: finish={finish}"
+
+
+def test_empty_answer_exit_3(monkeypatch):
+    """agent_loop с пустым content и без tool_calls → exit 3."""
+    # Заглушка call_llm: возвращает ("", [], None, "", {}) — пусто
+    calls = {"n": 0}
+    def fake_call_llm(messages, on_delta=None, guard=None):
+        calls["n"] += 1
+        return "", [], None, "", {}
+    monkeypatch.setattr(aigent, "call_llm", fake_call_llm)
+    monkeypatch.setattr(aigent, "save_result", lambda *a, **k: None)
+    rc = aigent.agent_loop("test")
+    assert rc == 3, f"ожидался exit 3, получен {rc}, вызовов call_llm={calls['n']}"
