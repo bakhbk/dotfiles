@@ -14,5 +14,9 @@ git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-m
 git clone https://github.com/MichaelAquilina/zsh-you-should-use.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/you-should-use
 git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
 
+# Custom themes: копируем из dotfiles (источник: shell/themes/)
+mkdir -p ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/themes
+cp -f "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"/shell/themes/*.zsh-theme ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/themes/
+
 echo "inastall zsh if not exit - \$(apt install zsh)"
 echo "Done! Reload terminal to apply  changes."
