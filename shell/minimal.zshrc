@@ -1,5 +1,5 @@
 if [[ "$OSTYPE" == "darwin"* ]]; then
-  ZSH_THEME="robbyrussell-time"  # macOS (robbyrussell + часы)
+  ZSH_THEME="bakhbk"             # macOS (robbyrussell + часы)
 else
   ZSH_THEME="bureau"      # Другая ОС (Linux, Windows WSL и т. д.)
 fi
