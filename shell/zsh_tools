@@ -524,7 +524,7 @@ fs() {
     # grep over files in this directory (the official fzf 0.7x pattern).
     # ${(q)dir} -- shell-safe quoting; \\{} -- escape плейсхолдера fzf.
     # No -maxdepth: recursive find for nested directory structures.
-    local _reloader="find $qdir -type f -exec grep -il -- \"\$FZF_QUERY\" \\{} + 2>/dev/null"
+    local _reloader="{ find $qdir -type f -iname \"*\$FZF_QUERY*\"; find $qdir -type f -exec grep -il -- \"\$FZF_QUERY\" \\{} +; } 2>/dev/null | sort -u"
     f=$(find "$dir" -type f \
         | fzf --disabled \
                --bind "change:reload(${_reloader})" \
