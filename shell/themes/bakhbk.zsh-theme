@@ -1,4 +1,4 @@
-# Дата, временем и git-статусом на строке над промптом: 01-15 20:33 *2!3?1 +2 ↓1 ⇡ ✹
+# Дата, временем и git-статусом на строке над промптом: 20:33 15-01-2025 *2!3?1 +2 ↓1 ⇡ ✹
 # Сбрасываем RPROMPT, если он остался от другой версии темы
 unset RPROMPT
 
@@ -56,7 +56,7 @@ _bakhbk_git_status() {
   [[ -n "$out" ]] && print -n "$out"
 }
 
-PROMPT=$'%F{240}◷  %D{%m-%d %H:%M}$(_bakhbk_git_status)\n%f'
+PROMPT=$'%F{240}◷  %D{%H:%M %d-%m-%Y}$(_bakhbk_git_status)\n%f'
 PROMPT+='%(?:%{$fg_bold[green]%}%1{➜%} :%{$fg_bold[red]%}%1{➜%} ) %{$fg[cyan]%}%c%{$reset_color%}'
 PROMPT+=' $(git_prompt_info)'
 
