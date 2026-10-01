@@ -3,7 +3,7 @@
 #        uv run ./aigent.py --prompt-file prompt.md --provider X --model Y
 #        uv run ./aigent.py --prompt-file - --cwd /path/to/project
 # /// script
-# dependencies = ["requests>=2.31.0"]
+# dependencies = ["requests>=2.31.0", "pyyaml>=6.0"]
 # ///
 """LLM coding agent.
 
@@ -17,6 +17,9 @@
 - Ошибки API: retry x3 (паузы 3/5/10s) на network/429/5xx, 4xx — сразу ошибка.
 - Loop-защита включена по умолчанию. Отключение: --no-loop-guard
   или AIGENT_LOOP_GUARD=off.
+- Профиль thinking читается из ~/.config/dispatch/model-capabilities.yaml
+  (per-model thinking/fallback_thinking, глобальный default_thinking).
+  Override: --thinking NAME или AIGENT_THINKING=NAME.
 - Exit code: 0 = успех, 1 = ошибка/макс. turn'ов, 3 = пустой ответ LLM, 130 = Ctrl-C.
 """
 
@@ -38,6 +41,7 @@ import uuid
 from contextlib import contextmanager
 
 import requests
+import yaml
 
 # --------------------------------------------------------------------------
 # Config
@@ -94,6 +98,118 @@ MAX_TOOL_RESULT = 16_000         # обрезка tool-результата пр
 AIGENT_DIR = os.getenv("AIGENT_DIR",
                        os.path.expanduser("~/.local/state/aigent"))
 os.makedirs(AIGENT_DIR, exist_ok=True)
+
+DISPATCH_CONFIG_DIR = os.path.expanduser(
+    os.getenv("DISPATCH_CONFIG_DIR", "~/.config/dispatch"))
+CAPABILITIES_FILE = os.path.join(DISPATCH_CONFIG_DIR, "model-capabilities.yaml")
+
+DEFAULT_CAPABILITIES_YAML = """\
+# model-capabilities.yaml
+# Вручную поддерживается. Не перезаписывается автоматически.
+# Создаётся только если отсутствует.
+#
+# Профиль thinking для модели резолвится в порядке:
+#   --thinking → AIGENT_THINKING → models[<model>].thinking
+#   → models[<model>].fallback_thinking → default_thinking → "low"
+
+default_thinking: low
+
+thinking_profiles:
+  off:
+    think: false
+    reasoning: false
+    enable_thinking: false
+    reasoning_effort: "none"
+    chat_template_kwargs: {enable_thinking: false, thinking: false}
+    reasoning_config: {enabled: false}
+  low:
+    enable_thinking: true
+    reasoning_effort: "low"
+    chat_template_kwargs: {enable_thinking: true}
+  medium:
+    enable_thinking: true
+    reasoning_effort: "medium"
+    chat_template_kwargs: {enable_thinking: true}
+  xhigh:
+    enable_thinking: true
+    preserve_thinking: true
+    reasoning_effort: "xhigh"
+    chat_template_kwargs: {enable_thinking: true, preserve_thinking: true}
+
+models: {}
+"""
+
+THINKING_PROFILE: dict = {}      # резолвится в main() до agent_loop
+THINKING_PROFILE_NAME: str = ""  # для лога
+
+
+def _ensure_capabilities(auto_yes: bool) -> bool:
+    """True — файл есть или создан. False — отказ/нет TTY (caller делает exit 1)."""
+    if os.path.exists(CAPABILITIES_FILE):
+        return True
+    if auto_yes or os.getenv("AIGENT_AUTOCREATE") == "1":
+        create = True
+    elif not sys.stdin.isatty():
+        print(f"{CAPABILITIES_FILE} not found. "
+              f"Create it or pass --yes / AIGENT_AUTOCREATE=1.",
+              file=sys.stderr)
+        return False
+    else:
+        ans = input(f"{CAPABILITIES_FILE} not found. Create default? [y/N] ").strip().lower()
+        create = (ans == "y")
+    if not create:
+        return False
+    os.makedirs(DISPATCH_CONFIG_DIR, exist_ok=True)
+    tmp = CAPABILITIES_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(DEFAULT_CAPABILITIES_YAML)
+    os.replace(tmp, CAPABILITIES_FILE)
+    status(f"✅ created: {CAPABILITIES_FILE}")
+    return True
+
+
+def _load_capabilities() -> dict:
+    try:
+        with open(CAPABILITIES_FILE, encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except OSError as e:
+        status(f"⚠️  cannot read {CAPABILITIES_FILE}: {e}")
+        return {}
+    except yaml.YAMLError as e:
+        status(f"⚠️  invalid YAML in {CAPABILITIES_FILE}: {e}")
+        return {}
+
+
+def _resolve_thinking(model: str, explicit: str | None, caps: dict) -> tuple[str, dict]:
+    """(name, profile_dict). Порядок: explicit → env → model.thinking
+    → model.fallback_thinking → default_thinking → 'low'."""
+    profiles = caps.get("thinking_profiles") or {}
+    models = caps.get("models") or {}
+    default_name = caps.get("default_thinking") or "low"
+
+    candidates: list[str] = []
+    if explicit:
+        candidates.append(explicit)
+    env = os.getenv("AIGENT_THINKING") or os.getenv("LLM_THINKING")
+    if env in ("on", "off"):
+        if env == "off":
+            candidates.append("off")
+    elif env:
+        candidates.append(env)
+
+    m = models.get(model) or models.get("*") or {}
+    if isinstance(m, dict):
+        if m.get("thinking"):
+            candidates.append(m["thinking"])
+        if m.get("fallback_thinking"):
+            candidates.append(m["fallback_thinking"])
+    candidates.append(default_name)
+    candidates.append("low")
+
+    for name in candidates:
+        if name in profiles:
+            return name, profiles[name]
+    return "low", {}
 
 SYSTEM_PROMPT = """\
 You are a coding agent. Your job is to help the user with programming tasks.
@@ -420,13 +536,8 @@ def call_llm(messages, on_delta=None, guard=None):
         payload["tool_choice"] = "auto"
     if not NO_USAGE:
         payload["stream_options"] = {"include_usage": True}
-    if LLM_THINKING == "off":
-        # «дробовик»: все известные диалекты off (как в doit.sh) — провайдеры
-        # понимают только свои флаги, остальные игнорируют.
-        payload.update(think=False, reasoning=False, enable_thinking=False,
-                       reasoning_effort="none",
-                       chat_template_kwargs={"enable_thinking": False, "thinking": False},
-                       reasoning_config={"enabled": False})
+    if THINKING_PROFILE:
+        payload.update(THINKING_PROFILE)
     last_err = ""
     for attempt in range(1 + len(RETRY_DELAYS)):
         if attempt:
@@ -928,7 +1039,7 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
 
 
 def main() -> int:
-    global VERBOSE, QUIET, NO_USAGE, NO_TOOLS, LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL, LLM_API_KEY, MAX_TURNS, MAX_TOKENS, LLM_THINKING, LOOP_GUARD_ENABLED
+    global VERBOSE, QUIET, NO_USAGE, NO_TOOLS, LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL, LLM_API_KEY, MAX_TURNS, MAX_TOKENS, LLM_THINKING, LOOP_GUARD_ENABLED, THINKING_PROFILE, THINKING_PROFILE_NAME
     parser = argparse.ArgumentParser(description="LLM coding agent (v2)")
     parser.add_argument("prompt", nargs="?", help="Task description")
     parser.add_argument("-s", "--system-prompt", default=None,
@@ -957,7 +1068,11 @@ def main() -> int:
     parser.add_argument("--max-tokens", type=int, default=None,
                         help=f"Override MAX_TOKENS (default: {MAX_TOKENS})")
     parser.add_argument("--no-thinking", action="store_true",
-                        help="Force LLM_THINKING=off")
+                        help="Alias for --thinking off")
+    parser.add_argument("--thinking", default=None,
+                        help="Thinking profile: off|low|medium|xhigh (default: per-model from YAML)")
+    parser.add_argument("-y", "--yes", action="store_true",
+                        help="Auto-create model-capabilities.yaml if missing")
     parser.add_argument("--no-loop-guard", action="store_true",
                         help="Disable loop-guard and watchdog entirely")
     parser.add_argument("--cwd", default=None,
@@ -975,7 +1090,7 @@ def main() -> int:
     if args.max_tokens:
         MAX_TOKENS = args.max_tokens
     if args.no_thinking:
-        LLM_THINKING = "off"
+        args.thinking = "off"
     if args.no_loop_guard:
         LOOP_GUARD_ENABLED = False
     if args.cwd:
@@ -1016,6 +1131,13 @@ def main() -> int:
     if args.system_prompt_file:
         with open(args.system_prompt_file, encoding="utf-8") as f:
             system_prompt = f.read()
+
+    if not _ensure_capabilities(auto_yes=args.yes):
+        return 1
+    caps = _load_capabilities()
+    THINKING_PROFILE_NAME, THINKING_PROFILE = _resolve_thinking(
+        LLM_MODEL, args.thinking, caps)
+    status(f"🧠 thinking: {THINKING_PROFILE_NAME} (model={LLM_MODEL})")
 
     signal.signal(signal.SIGINT, _on_int)
     start_log()
