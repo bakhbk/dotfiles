@@ -36,8 +36,24 @@ fi
 # Aliases for applications
 alias mchrome='open -n -a "Google Chrome" --args --user-data-dir="$HOME/.config/.chrome-mog-profile" --disable-web-security'
 
-# Collect all files in the current directory and subdirectories with specific extensions, excluding certain directories, and copy their contents to the clipboard.
-alias dumpdir='{ for f in $(find . -type f \( -name "*.md" -o -name "*.py" -o -name "*.sh" -o -name "*.txt" -o -name "*.json" -o -name "*.yaml" -o -name "*.yml" -o -name "*.toml" \) -not -path "*/.git/*" -not -path "*/__pycache__/*" -not -path "*/node_modules/*" | sort); do printf "\n════════ %s ════════\n" "$f"; cat "$f"; done; } | pbcopy; echo "✅ $(pbpaste | wc -l) lines"'
+# Dump all files under a directory (default: current) to the clipboard,
+# excluding junk dirs and masking sensitive values (keys, tokens, passwords, ...).
+# Usage: dumpdir [dir]
+dumpdir() {
+    local src="${1:-.}" tmp
+    tmp=$(mktemp "${TMPDIR:-/tmp}/dumpdir.XXXXXX")
+    if python3 "$HOME/dotfiles/scripts/dumpdir.py" "$src" > "$tmp"; then
+        if command -v pbcopy >/dev/null 2>&1; then
+            pbcopy < "$tmp"
+            echo "✅ $(wc -l < "$tmp" | tr -d ' ') lines copied to clipboard (secrets masked)"
+        else
+            cat "$tmp"
+        fi
+    else
+        echo "❌ dumpdir: failed" >&2
+    fi
+    rm -f "$tmp"
+}
 
 # Tools
 alias df='df -h'
