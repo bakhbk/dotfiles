@@ -18,5 +18,12 @@ git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:
 mkdir -p ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/themes
 cp -f "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"/shell/themes/*.zsh-theme ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/themes/
 
-echo "inastall zsh if not exit - \$(apt install zsh)"
+# Install zsh if it is not present
+if ! command -v zsh >/dev/null 2>&1; then
+    if command -v apt >/dev/null 2>&1; then
+        sudo apt install -y zsh
+    elif command -v brew >/dev/null 2>&1; then
+        brew install zsh
+    fi
+fi
 echo "Done! Reload terminal to apply  changes."

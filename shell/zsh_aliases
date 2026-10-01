@@ -39,6 +39,7 @@ alias mchrome='open -n -a "Google Chrome" --args --user-data-dir="$HOME/.config/
 # Dump all files under a directory (default: current) to the clipboard,
 # excluding junk dirs and masking sensitive values (keys, tokens, passwords, ...).
 # Usage: dumpdir [dir]
+unalias dumpdir 2>/dev/null   # allow reload: drop leftover alias from a previous session
 dumpdir() {
     local src="${1:-.}" tmp
     tmp=$(mktemp "${TMPDIR:-/tmp}/dumpdir.XXXXXX")
