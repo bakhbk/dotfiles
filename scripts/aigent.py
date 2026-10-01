@@ -114,7 +114,7 @@ DEFAULT_CAPABILITIES_YAML = """\
 #   → default_thinking → "l". Если уровня нет у модели — идём вниз
 #   по level_order до ближайшего доступного.
 
-level_order: [off, l, h, xh, xxh]
+level_order: ["off", l, m, h, xh, xxh]
 
 level_presets:
   thinking_5:
@@ -126,6 +126,7 @@ level_presets:
       chat_template_kwargs: {enable_thinking: false, thinking: false}
       reasoning_config: {enabled: false}
     l:   {enable_thinking: true, reasoning_effort: "low"}
+    m:   {enable_thinking: true, reasoning_effort: "medium"}
     h:   {enable_thinking: true, reasoning_effort: "high"}
     xh:  {enable_thinking: true, reasoning_effort: "xhigh"}
     xxh: {enable_thinking: true, reasoning_effort: "xhigh", preserve_thinking: true}
@@ -138,10 +139,12 @@ level_presets:
       chat_template_kwargs: {enable_thinking: false, thinking: false}
       reasoning_config: {enabled: false}
     l:   {enable_thinking: true, reasoning_effort: "low"}
-    h:   {enable_thinking: true, reasoning_effort: "medium"}
+    m:   {enable_thinking: true, reasoning_effort: "medium"}
+    h:   {enable_thinking: true, reasoning_effort: "high"}
   onoff:
-    off: {enable_thinking: false}
+    "off": {enable_thinking: false}
     l:   {enable_thinking: true}
+    m:   {enable_thinking: true}
     h:   {enable_thinking: true}
     xh:  {enable_thinking: true}
     xxh: {enable_thinking: true}
@@ -159,7 +162,7 @@ _FALLBACK_LEVELS: dict = {}
 # Заполняются в main() до agent_loop
 THINKING_PROFILE: dict = {}
 THINKING_PROFILE_NAME: str = ""
-LEVEL_ORDER: list = ["off", "l", "h", "xh", "xxh"]
+LEVEL_ORDER: list = ["off", "l", "m", "h", "xh", "xxh"]
 
 
 def _ensure_capabilities(auto_yes: bool) -> bool:
@@ -241,7 +244,7 @@ def _levels_for_model(model: str, caps: dict) -> dict:
             levels[_norm_level_key(k)] = v
 
     # Override отдельных уровней прямо в модели (top-level, если ключ совпал с уровнем)
-    order = caps.get("level_order") or ["off", "l", "h", "xh", "xxh"]
+    order = caps.get("level_order") or ["off", "l", "m", "h", "xh", "xxh"]
     for lvl in order:
         if lvl in m and isinstance(m[lvl], dict):
             base = levels.get(lvl) or {}
@@ -250,10 +253,17 @@ def _levels_for_model(model: str, caps: dict) -> dict:
     return levels
 
 
+class ThinkingLevelError(ValueError):
+    """Неизвестный --thinking уровень."""
+
+
 def _resolve_level(model: str, explicit: str | None, caps: dict) -> tuple[str, dict]:
     """(level_name, payload). Порядок: explicit → env → model.thinking
     → default_thinking → 'l'. Fallback: вниз по level_order."""
-    order = caps.get("level_order") or ["off", "l", "h", "xh", "xxh"]
+    order = caps.get("level_order") or ["off", "l", "m", "h", "xh", "xxh"]
+    if explicit and explicit not in order:
+        raise ThinkingLevelError(
+            f"unknown --thinking '{explicit}'; valid: {', '.join(order)}")
 
     candidates: list[str] = []
     if explicit:
@@ -1229,8 +1239,12 @@ def main() -> int:
         return 1
     caps = _load_capabilities()
     LEVEL_ORDER = caps.get("level_order") or LEVEL_ORDER
-    THINKING_PROFILE_NAME, THINKING_PROFILE = _resolve_level(
-        LLM_MODEL, args.thinking, caps)
+    try:
+        THINKING_PROFILE_NAME, THINKING_PROFILE = _resolve_level(
+            LLM_MODEL, args.thinking, caps)
+    except ThinkingLevelError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 1
     status(f"🧠 thinking: {THINKING_PROFILE_NAME} (model={LLM_MODEL})")
 
     signal.signal(signal.SIGINT, _on_int)

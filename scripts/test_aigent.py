@@ -15,7 +15,7 @@ def _guard():
 
 
 CAPS_FIXTURE = {
-    "level_order": ["off", "l", "h", "xh", "xxh"],
+    "level_order": ["off", "l", "m", "h", "xh", "xxh"],
     "level_presets": {
         "thinking_5": {
             "off": {"think": False, "enable_thinking": False,
@@ -29,7 +29,8 @@ CAPS_FIXTURE = {
         "thinking_3": {
             "off": {"think": False, "enable_thinking": False},
             "l":   {"enable_thinking": True, "reasoning_effort": "low"},
-            "h":   {"enable_thinking": True, "reasoning_effort": "medium"},
+            "m":   {"enable_thinking": True, "reasoning_effort": "medium"},
+            "h":   {"enable_thinking": True, "reasoning_effort": "high"},
         },
     },
     "default_levels_ref": "thinking_3",
@@ -55,7 +56,7 @@ def test_resolve_fallback_down():
     # thinking_3 не имеет xh — должен откатиться на h
     name, payload = aigent._resolve_level("qwen3.6-35b", "xh", CAPS_FIXTURE)
     assert name == "h"
-    assert payload["reasoning_effort"] == "medium"
+    assert payload["reasoning_effort"] == "high"
 
 
 def test_resolve_xxh_fallback_to_xh():
@@ -86,6 +87,20 @@ def test_resolve_off():
     name, payload = aigent._resolve_level("qwen3.8-27b", "off", CAPS_FIXTURE)
     assert name == "off"
     assert payload["enable_thinking"] is False
+
+
+def test_resolve_m_level():
+    name, payload = aigent._resolve_level("qwen3.6-35b", "m", CAPS_FIXTURE)
+    assert name == "m"
+    assert payload["reasoning_effort"] == "medium"
+
+
+def test_resolve_unknown_level_raises():
+    import pytest as _pt
+    with _pt.raises(aigent.ThinkingLevelError):
+        aigent._resolve_level("qwen3.8-27b", "xxl", CAPS_FIXTURE)
+    with _pt.raises(aigent.ThinkingLevelError):
+        aigent._resolve_level("qwen3.8-27b", "offf", CAPS_FIXTURE)
 
 
 class FakeResp:
