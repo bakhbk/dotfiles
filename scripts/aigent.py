@@ -205,7 +205,6 @@ def _load_capabilities() -> dict:
         caps["level_presets"] = {"legacy": caps["thinking_profiles"]}
         caps.setdefault("default_levels_ref", "legacy")
     if not caps.get("level_presets"):
-        status(f"⚠️  {CAPABILITIES_FILE}: no level_presets, using built-in defaults")
         caps["level_presets"] = defaults["level_presets"]
         caps.setdefault("default_levels_ref", defaults["default_levels_ref"])
     caps.setdefault("level_order", defaults["level_order"])
