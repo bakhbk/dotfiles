@@ -118,13 +118,25 @@ level_order: [off, l, h, xh, xxh]
 
 level_presets:
   thinking_5:
-    off: {think: false, enable_thinking: false, reasoning_effort: "none"}
+    "off":
+      think: false
+      reasoning: false
+      enable_thinking: false
+      reasoning_effort: "none"
+      chat_template_kwargs: {enable_thinking: false, thinking: false}
+      reasoning_config: {enabled: false}
     l:   {enable_thinking: true, reasoning_effort: "low"}
     h:   {enable_thinking: true, reasoning_effort: "high"}
     xh:  {enable_thinking: true, reasoning_effort: "xhigh"}
     xxh: {enable_thinking: true, reasoning_effort: "xhigh", preserve_thinking: true}
   thinking_3:
-    off: {think: false, enable_thinking: false}
+    "off":
+      think: false
+      reasoning: false
+      enable_thinking: false
+      reasoning_effort: "none"
+      chat_template_kwargs: {enable_thinking: false, thinking: false}
+      reasoning_config: {enabled: false}
     l:   {enable_thinking: true, reasoning_effort: "low"}
     h:   {enable_thinking: true, reasoning_effort: "medium"}
   onoff:
