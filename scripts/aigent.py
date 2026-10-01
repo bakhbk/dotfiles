@@ -759,7 +759,7 @@ class LoopGuard:
 
 
 def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
-    status(f"🔗 provider={LLM_PROVIDER} {LLM_BASE_URL} model={LLM_MODEL}")
+    log(f"🔗 provider={LLM_PROVIDER} {LLM_BASE_URL} model={LLM_MODEL}")
     log(f"prompt: {user_message}")
 
     user_content = build_user_content(user_message)
