@@ -115,7 +115,7 @@ DEFAULT_CAPABILITIES_YAML = """\
 default_thinking: low
 
 thinking_profiles:
-  off:
+  'off':
     think: false
     reasoning: false
     enable_thinking: false
@@ -171,21 +171,37 @@ def _ensure_capabilities(auto_yes: bool) -> bool:
 def _load_capabilities() -> dict:
     try:
         with open(CAPABILITIES_FILE, encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
+            caps = yaml.safe_load(f) or {}
     except OSError as e:
         status(f"⚠️  cannot read {CAPABILITIES_FILE}: {e}")
-        return {}
+        caps = {}
     except yaml.YAMLError as e:
         status(f"⚠️  invalid YAML in {CAPABILITIES_FILE}: {e}")
-        return {}
+        caps = {}
+    if not caps.get("thinking_profiles"):
+        status(f"⚠️  {CAPABILITIES_FILE}: no thinking_profiles, using built-in defaults")
+        defaults = yaml.safe_load(DEFAULT_CAPABILITIES_YAML)
+        caps["thinking_profiles"] = defaults["thinking_profiles"]
+        caps.setdefault("default_thinking", defaults["default_thinking"])
+    return caps
 
 
 def _resolve_thinking(model: str, explicit: str | None, caps: dict) -> tuple[str, dict]:
     """(name, profile_dict). Порядок: explicit → env → model.thinking
     → model.fallback_thinking → default_thinking → 'low'."""
-    profiles = caps.get("thinking_profiles") or {}
+    raw_profiles = caps.get("thinking_profiles") or {}
+    # YAML 1.1 парсит off/on как bool; нормализуем обратно в строки
+    profiles = {}
+    for k, v in raw_profiles.items():
+        if k is False:
+            k = "off"
+        elif k is True:
+            k = "on"
+        profiles[k] = v
     models = caps.get("models") or {}
     default_name = caps.get("default_thinking") or "low"
+    if default_name is False:
+        default_name = "off"
 
     candidates: list[str] = []
     if explicit:
