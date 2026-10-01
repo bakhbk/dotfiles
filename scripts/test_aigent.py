@@ -14,6 +14,80 @@ def _guard():
     return aigent.LoopGuard(enabled=True, window=2000, probe=100, repeat=2)
 
 
+CAPS_FIXTURE = {
+    "level_order": ["off", "l", "h", "xh", "xxh"],
+    "level_presets": {
+        "thinking_5": {
+            "off": {"think": False, "enable_thinking": False,
+                    "reasoning_effort": "none"},
+            "l":   {"enable_thinking": True, "reasoning_effort": "low"},
+            "h":   {"enable_thinking": True, "reasoning_effort": "high"},
+            "xh":  {"enable_thinking": True, "reasoning_effort": "xhigh"},
+            "xxh": {"enable_thinking": True, "reasoning_effort": "xhigh",
+                    "preserve_thinking": True},
+        },
+        "thinking_3": {
+            "off": {"think": False, "enable_thinking": False},
+            "l":   {"enable_thinking": True, "reasoning_effort": "low"},
+            "h":   {"enable_thinking": True, "reasoning_effort": "medium"},
+        },
+    },
+    "default_levels_ref": "thinking_3",
+    "default_thinking": "l",
+    "models": {
+        "qwen3.8-27b": {"levels_ref": "thinking_5"},
+        "qwen3.6-35b": {"levels_ref": "thinking_3"},
+        "custom": {
+            "levels_ref": "thinking_3",
+            "xh": {"enable_thinking": True, "reasoning_effort": "xhigh"},
+        },
+    },
+}
+
+
+def test_resolve_exact():
+    name, payload = aigent._resolve_level("qwen3.8-27b", "xh", CAPS_FIXTURE)
+    assert name == "xh"
+    assert payload["reasoning_effort"] == "xhigh"
+
+
+def test_resolve_fallback_down():
+    # thinking_3 не имеет xh — должен откатиться на h
+    name, payload = aigent._resolve_level("qwen3.6-35b", "xh", CAPS_FIXTURE)
+    assert name == "h"
+    assert payload["reasoning_effort"] == "medium"
+
+
+def test_resolve_xxh_fallback_to_xh():
+    # thinking_5 имеет xxh, но если бы не было — упало бы на xh
+    name, _ = aigent._resolve_level("qwen3.8-27b", "xxh", CAPS_FIXTURE)
+    assert name == "xxh"
+
+
+def test_resolve_override_merges():
+    # custom: levels_ref=thinking_3 (нет xh) + top-level override xh
+    name, payload = aigent._resolve_level("custom", "xh", CAPS_FIXTURE)
+    assert name == "xh"
+    assert payload["reasoning_effort"] == "xhigh"
+
+
+def test_resolve_default_when_no_explicit():
+    name, _ = aigent._resolve_level("qwen3.6-35b", None, CAPS_FIXTURE)
+    assert name == "l"
+
+
+def test_resolve_unknown_model_falls_back():
+    name, payload = aigent._resolve_level("nope", "xxh", CAPS_FIXTURE)
+    # default_levels_ref=thinking_3, xxh нет → вниз до h
+    assert name == "h"
+
+
+def test_resolve_off():
+    name, payload = aigent._resolve_level("qwen3.8-27b", "off", CAPS_FIXTURE)
+    assert name == "off"
+    assert payload["enable_thinking"] is False
+
+
 class FakeResp:
     def __init__(self, lines):
         self._lines = lines

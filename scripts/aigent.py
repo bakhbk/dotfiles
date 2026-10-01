@@ -108,39 +108,46 @@ DEFAULT_CAPABILITIES_YAML = """\
 # Вручную поддерживается. Не перезаписывается автоматически.
 # Создаётся только если отсутствует.
 #
-# Профиль thinking для модели резолвится в порядке:
-#   --thinking → AIGENT_THINKING → models[<model>].thinking
-#   → models[<model>].fallback_thinking → default_thinking → "low"
+# Своя градация уровней: off < l < h < xh < xxh.
+# Для каждой модели — набор level_presets (или свой levels/levels_ref).
+# Резолвинг: --thinking → AIGENT_THINKING → models[m].thinking
+#   → default_thinking → "l". Если уровня нет у модели — идём вниз
+#   по level_order до ближайшего доступного.
 
-default_thinking: low
+level_order: [off, l, h, xh, xxh]
 
-thinking_profiles:
-  'off':
-    think: false
-    reasoning: false
-    enable_thinking: false
-    reasoning_effort: "none"
-    chat_template_kwargs: {enable_thinking: false, thinking: false}
-    reasoning_config: {enabled: false}
-  low:
-    enable_thinking: true
-    reasoning_effort: "low"
-    chat_template_kwargs: {enable_thinking: true}
-  medium:
-    enable_thinking: true
-    reasoning_effort: "medium"
-    chat_template_kwargs: {enable_thinking: true}
-  xhigh:
-    enable_thinking: true
-    preserve_thinking: true
-    reasoning_effort: "xhigh"
-    chat_template_kwargs: {enable_thinking: true, preserve_thinking: true}
+level_presets:
+  thinking_5:
+    off: {think: false, enable_thinking: false, reasoning_effort: "none"}
+    l:   {enable_thinking: true, reasoning_effort: "low"}
+    h:   {enable_thinking: true, reasoning_effort: "high"}
+    xh:  {enable_thinking: true, reasoning_effort: "xhigh"}
+    xxh: {enable_thinking: true, reasoning_effort: "xhigh", preserve_thinking: true}
+  thinking_3:
+    off: {think: false, enable_thinking: false}
+    l:   {enable_thinking: true, reasoning_effort: "low"}
+    h:   {enable_thinking: true, reasoning_effort: "medium"}
+  onoff:
+    off: {enable_thinking: false}
+    l:   {enable_thinking: true}
+    h:   {enable_thinking: true}
+    xh:  {enable_thinking: true}
+    xxh: {enable_thinking: true}
+
+default_levels_ref: thinking_3
+default_thinking: l
 
 models: {}
 """
 
-THINKING_PROFILE: dict = {}      # резолвится в main() до agent_loop
-THINKING_PROFILE_NAME: str = ""  # для лога
+# Хардкод-fallback, если YAML совсем пуст
+_FALLBACK_LEVEL = "l"
+_FALLBACK_LEVELS: dict = {}
+
+# Заполняются в main() до agent_loop
+THINKING_PROFILE: dict = {}
+THINKING_PROFILE_NAME: str = ""
+LEVEL_ORDER: list = ["off", "l", "h", "xh", "xxh"]
 
 
 def _ensure_capabilities(auto_yes: bool) -> bool:
@@ -178,30 +185,64 @@ def _load_capabilities() -> dict:
     except yaml.YAMLError as e:
         status(f"⚠️  invalid YAML in {CAPABILITIES_FILE}: {e}")
         caps = {}
-    if not caps.get("thinking_profiles"):
-        status(f"⚠️  {CAPABILITIES_FILE}: no thinking_profiles, using built-in defaults")
-        defaults = yaml.safe_load(DEFAULT_CAPABILITIES_YAML)
-        caps["thinking_profiles"] = defaults["thinking_profiles"]
-        caps.setdefault("default_thinking", defaults["default_thinking"])
+    defaults = yaml.safe_load(DEFAULT_CAPABILITIES_YAML)
+    # Миграция старого формата: thinking_profiles → level_presets["legacy"]
+    if not caps.get("level_presets") and caps.get("thinking_profiles"):
+        status(f"⚠️  {CAPABILITIES_FILE}: legacy thinking_profiles, "
+               f"treating as level_presets['legacy']")
+        caps["level_presets"] = {"legacy": caps["thinking_profiles"]}
+        caps.setdefault("default_levels_ref", "legacy")
+    if not caps.get("level_presets"):
+        status(f"⚠️  {CAPABILITIES_FILE}: no level_presets, using built-in defaults")
+        caps["level_presets"] = defaults["level_presets"]
+        caps.setdefault("default_levels_ref", defaults["default_levels_ref"])
+    caps.setdefault("level_order", defaults["level_order"])
+    caps.setdefault("default_thinking", defaults["default_thinking"])
     return caps
 
 
-def _resolve_thinking(model: str, explicit: str | None, caps: dict) -> tuple[str, dict]:
-    """(name, profile_dict). Порядок: explicit → env → model.thinking
-    → model.fallback_thinking → default_thinking → 'low'."""
-    raw_profiles = caps.get("thinking_profiles") or {}
-    # YAML 1.1 парсит off/on как bool; нормализуем обратно в строки
-    profiles = {}
-    for k, v in raw_profiles.items():
-        if k is False:
-            k = "off"
-        elif k is True:
-            k = "on"
-        profiles[k] = v
+def _norm_level_key(k):
+    """YAML 1.1 парсит off/on как bool; нормализуем обратно в строки."""
+    if k is False:
+        return "off"
+    if k is True:
+        return "on"
+    return k
+
+
+def _levels_for_model(model: str, caps: dict) -> dict:
+    """Собрать levels для модели: явные → levels_ref → default_levels_ref."""
     models = caps.get("models") or {}
-    default_name = caps.get("default_thinking") or "low"
-    if default_name is False:
-        default_name = "off"
+    presets = caps.get("level_presets") or {}
+    m = models.get(model) or models.get("*") or {}
+    if not isinstance(m, dict):
+        m = {}
+
+    levels: dict = {}
+    ref = m.get("levels_ref") or caps.get("default_levels_ref")
+    if ref and ref in presets:
+        for k, v in (presets[ref] or {}).items():
+            levels[_norm_level_key(k)] = v
+
+    explicit = m.get("levels")
+    if isinstance(explicit, dict):
+        for k, v in explicit.items():
+            levels[_norm_level_key(k)] = v
+
+    # Override отдельных уровней прямо в модели (top-level, если ключ совпал с уровнем)
+    order = caps.get("level_order") or ["off", "l", "h", "xh", "xxh"]
+    for lvl in order:
+        if lvl in m and isinstance(m[lvl], dict):
+            base = levels.get(lvl) or {}
+            levels[lvl] = {**base, **m[lvl]}
+
+    return levels
+
+
+def _resolve_level(model: str, explicit: str | None, caps: dict) -> tuple[str, dict]:
+    """(level_name, payload). Порядок: explicit → env → model.thinking
+    → default_thinking → 'l'. Fallback: вниз по level_order."""
+    order = caps.get("level_order") or ["off", "l", "h", "xh", "xxh"]
 
     candidates: list[str] = []
     if explicit:
@@ -213,19 +254,44 @@ def _resolve_thinking(model: str, explicit: str | None, caps: dict) -> tuple[str
     elif env:
         candidates.append(env)
 
+    models = caps.get("models") or {}
     m = models.get(model) or models.get("*") or {}
-    if isinstance(m, dict):
-        if m.get("thinking"):
-            candidates.append(m["thinking"])
-        if m.get("fallback_thinking"):
-            candidates.append(m["fallback_thinking"])
-    candidates.append(default_name)
-    candidates.append("low")
+    if isinstance(m, dict) and m.get("thinking"):
+        candidates.append(m["thinking"])
+    requested = list(candidates)  # explicit/env/model.thinking — без дефолта
+    candidates.append(caps.get("default_thinking") or _FALLBACK_LEVEL)
+    candidates.append(_FALLBACK_LEVEL)
 
-    for name in candidates:
-        if name in profiles:
-            return name, profiles[name]
-    return "low", {}
+    levels = _levels_for_model(model, caps)
+    if not levels:
+        return _FALLBACK_LEVEL, {}
+
+    # Нормализуем кандидатов
+    norm_candidates = [_norm_level_key(c) for c in candidates]
+    norm_requested = [_norm_level_key(c) for c in requested]
+
+    # Точное совпадение: сначала только запрошенные (без дефолта),
+    # иначе дефолт перекроет вниз-fallback по level_order
+    for name in norm_requested or norm_candidates:
+        if name in levels:
+            return name, levels[name]
+
+    # Fallback: вниз по level_order от первого валидного кандидата
+    order_idx = {lvl: i for i, lvl in enumerate(order)}
+    for name in norm_candidates:
+        if name not in order_idx:
+            continue
+        start = order_idx[name]
+        for i in range(start, -1, -1):
+            lvl = order[i]
+            if lvl in levels:
+                return lvl, levels[lvl]
+
+    # Ничего не нашли — берём самый низкий доступный
+    for lvl in order:
+        if lvl in levels:
+            return lvl, levels[lvl]
+    return _FALLBACK_LEVEL, {}
 
 SYSTEM_PROMPT = """\
 You are a coding agent. Your job is to help the user with programming tasks.
@@ -1055,7 +1121,7 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
 
 
 def main() -> int:
-    global VERBOSE, QUIET, NO_USAGE, NO_TOOLS, LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL, LLM_API_KEY, MAX_TURNS, MAX_TOKENS, LLM_THINKING, LOOP_GUARD_ENABLED, THINKING_PROFILE, THINKING_PROFILE_NAME
+    global VERBOSE, QUIET, NO_USAGE, NO_TOOLS, LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL, LLM_API_KEY, MAX_TURNS, MAX_TOKENS, LLM_THINKING, LOOP_GUARD_ENABLED, THINKING_PROFILE, THINKING_PROFILE_NAME, LEVEL_ORDER
     parser = argparse.ArgumentParser(description="LLM coding agent (v2)")
     parser.add_argument("prompt", nargs="?", help="Task description")
     parser.add_argument("-s", "--system-prompt", default=None,
@@ -1086,7 +1152,7 @@ def main() -> int:
     parser.add_argument("--no-thinking", action="store_true",
                         help="Alias for --thinking off")
     parser.add_argument("--thinking", default=None,
-                        help="Thinking profile: off|low|medium|xhigh (default: per-model from YAML)")
+                        help="Thinking level: off|l|h|xh|xxh (default: per-model from YAML)")
     parser.add_argument("-y", "--yes", action="store_true",
                         help="Auto-create model-capabilities.yaml if missing")
     parser.add_argument("--no-loop-guard", action="store_true",
@@ -1151,7 +1217,8 @@ def main() -> int:
     if not _ensure_capabilities(auto_yes=args.yes):
         return 1
     caps = _load_capabilities()
-    THINKING_PROFILE_NAME, THINKING_PROFILE = _resolve_thinking(
+    LEVEL_ORDER = caps.get("level_order") or LEVEL_ORDER
+    THINKING_PROFILE_NAME, THINKING_PROFILE = _resolve_level(
         LLM_MODEL, args.thinking, caps)
     status(f"🧠 thinking: {THINKING_PROFILE_NAME} (model={LLM_MODEL})")
 
