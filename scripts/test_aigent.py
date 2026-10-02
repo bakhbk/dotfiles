@@ -103,6 +103,42 @@ def test_resolve_unknown_level_raises():
         aigent._resolve_level("qwen3.8-27b", "offf", CAPS_FIXTURE)
 
 
+def _tc(name, args):
+    return {"function": {"name": name, "arguments": args}}
+
+
+def test_feed_tool_repeats_fires():
+    g = aigent.LoopGuard(enabled=True)
+    same = [_tc("bash", '{"command":"ls"}')]
+    assert g.feed_tool(same) is False   # 1-й
+    assert g.feed_tool(same) is False   # 2-й
+    assert g.feed_tool(same) is True    # 3-й → петля
+
+
+def test_feed_tool_different_no_fire():
+    g = aigent.LoopGuard(enabled=True)
+    assert g.feed_tool([_tc("bash", '{"command":"ls"}')]) is False
+    assert g.feed_tool([_tc("bash", '{"command":"cat x"}')]) is False
+    assert g.feed_tool([_tc("bash", '{"command":"pwd"}')]) is False
+
+
+def test_touch_repeat_marks_stuck():
+    g = aigent.LoopGuard(enabled=True)
+    tc = [_tc("bash", '{"command":"ls"}')]
+    for _ in range(aigent.WATCHDOG_REPEAT_LIMIT):
+        g.touch(tc, "", "")
+    assert g.stuck is True
+
+
+def test_touch_disabled_no_stuck():
+    g = aigent.LoopGuard(enabled=False)
+    tc = [_tc("bash", '{"command":"ls"}')]
+    for _ in range(10):
+        g.touch(tc, "", "")
+    assert g.stuck is False
+    assert g.feed_tool(tc) is False
+
+
 class FakeResp:
     def __init__(self, lines):
         self._lines = lines

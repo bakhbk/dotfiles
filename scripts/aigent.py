@@ -78,7 +78,7 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "local")  # человекочитае�
 LLM_HEADERS = {"Content-Type": "application/json",
                "Authorization": f"Bearer {LLM_API_KEY}"}
 
-MAX_TURNS = int(os.getenv("AIGENT_MAX_TURNS", "50"))
+MAX_TURNS = int(os.getenv("AIGENT_MAX_TURNS", "1000"))
 MAX_CONTINUES = 3                # сколько раз «дописывать» ответ при finish=length
 MAX_TOKENS = int(os.getenv("AIGENT_MAX_TOKENS", "32768"))  # бюджет вывода за вызов (think+ответ); поднять, если «may be incomplete»
 BASH_TIMEOUT = int(os.getenv("AIGENT_BASH_TIMEOUT", "120"))
@@ -90,6 +90,8 @@ LOOP_PROBE = int(os.getenv("AIGENT_LOOP_PROBE", "100"))       # probe = посл
 LOOP_REPEAT = int(os.getenv("AIGENT_LOOP_REPEAT", "2"))       # порог вхождений probe в окне → стоп
 LOOP_NORM = re.compile(r"\d+")                                 # инкремент-счётчики → '#'
 LOOP_GUARD_ENABLED = os.getenv("AIGENT_LOOP_GUARD", "on").lower() != "off"  # глобальный выключатель
+TOOL_REPEAT_LIMIT = int(os.getenv("AIGENT_TOOL_REPEAT_LIMIT", "3"))  # одинаковых tool_call подряд → stuck
+WATCHDOG_REPEAT_LIMIT = int(os.getenv("AIGENT_WATCHDOG_REPEAT_LIMIT", "3"))  # одинаковых сигнатур подряд → stuck
 LLM_TIMEOUT = (10, 300)          # (connect, read)
 STREAM_STALL = 180               # сек без полезных токенов в стриме = генератор умер
 RETRY_DELAYS = (3, 5, 10)        # 3 retry
@@ -332,7 +334,9 @@ Workflow:
 3. After gathering enough information or completing the task, give your final answer in natural language.
 4. To finish, reply with a regular message (no tool call).
 
-Be concise. Explain what you're doing before each command."""
+Be concise. Explain what you're doing before each command.
+If a command returns non-zero rc or no useful output, do NOT retry the
+same command — try a different approach or move on."""
 
 BASH_TAIL = """
 
@@ -890,9 +894,12 @@ class LoopGuard:
         self._cbuf = ""
         self._stuck = threading.Event()
         self._sig = None
+        self._sig_count = 0
         self._last_change = time.monotonic()
         self._stop = threading.Event()
         self._th = None
+        self._last_tool_sig = None
+        self._tool_sig_count = 0
 
     def feed(self, label, chunk):
         """True → зацикливание в стриме (reasoning или content)."""
@@ -932,9 +939,30 @@ class LoopGuard:
              + (reasoning or "")[:2000]).encode(),
             usedforsecurity=False,
         ).hexdigest()
-        if sig != self._sig:
+        if sig == self._sig:
+            self._sig_count += 1
+            if self._sig_count >= WATCHDOG_REPEAT_LIMIT - 1:
+                self._stuck.set()
+        else:
             self._sig = sig
+            self._sig_count = 0
             self._last_change = time.monotonic()
+
+    def feed_tool(self, tool_calls):
+        '''True → одинаковый набор tool_call повторился TOOL_REPEAT_LIMIT раз подряд.'''
+        if not self.enabled:
+            return False
+        sig = hashlib.md5(
+            repr([(tc["function"]["name"], tc["function"]["arguments"])
+                  for tc in tool_calls])[:2000].encode(),
+            usedforsecurity=False,
+        ).hexdigest()
+        if sig == self._last_tool_sig:
+            self._tool_sig_count += 1
+        else:
+            self._last_tool_sig = sig
+            self._tool_sig_count = 1
+        return self._tool_sig_count >= TOOL_REPEAT_LIMIT
 
     def reset(self):
         """Сброс окна наблюдения после nudge. Перезапускает _watch."""
@@ -1107,6 +1135,12 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                           else "empty answer after nudge")
                 save_result(last_content, reason)
                 return 3
+
+            if guard.feed_tool(tool_calls):
+                status("🔁 repeated tool_calls → abort")
+                log(f"🔁 tool loop: same tool_calls x{TOOL_REPEAT_LIMIT}+")
+                save_result(last_content, "tool loop detected")
+                return 1
 
             messages.append({"role": "assistant",
                              "content": content or None,
