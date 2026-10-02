@@ -46,6 +46,7 @@ JUNK_FILES = re.compile(
 )
 
 MAX_SIZE = 1_000_000          # files bigger than this are skipped
+MD_EXTS = {".md", ".markdown"}   # rendered as markdown, not a code block
 MASK = "***REDACTED***"
 
 # ---------------------------------------------------------------- value patterns
@@ -155,25 +156,31 @@ def mask_line(line: str) -> str:
 
 # ---------------------------------------------------------------- file walk
 
-def render_file(path: str, mask: bool) -> str:
+def render_file(path: str, mask: bool, indent: bool = True) -> str:
     try:
         size = os.path.getsize(path)
     except OSError:
-        return "  ⟨unreadable⟩\n"
+        return "    ⟨unreadable⟩\n"
     if size > MAX_SIZE:
-        return "  ⟨large file, skipped: %.1fMB⟩\n" % (size / 1_000_000)
+        return "    ⟨large file, skipped: %.1fMB⟩\n" % (size / 1_000_000)
     try:
         with open(path, "rb") as fh:
             raw = fh.read()
     except OSError as e:
-        return "  ⟨error: %s⟩\n" % e
+        return "    ⟨error: %s⟩\n" % e
     if b"\x00" in raw[:8192]:
-        return "  ⟨binary, skipped⟩\n"
+        return "    ⟨binary, skipped⟩\n"
     text = raw.decode("utf-8", errors="replace")
     if mask:
         text = mask_text(text)
     if text and not text.endswith("\n"):
         text += "\n"
+    if text and indent:
+        # indent so markdown renderers show the content as a code block
+        text = "    " + text.replace("\n", "\n    ")
+    elif text:
+        # blockquote: markdown renders, visually set apart from the header
+        text = "> " + text.replace("\n", "\n> ")
     return text
 
 
@@ -186,6 +193,7 @@ def main() -> int:
         print("dumpdir: not a directory: %s" % root, file=sys.stderr)
         return 1
 
+    first = True
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(d for d in dirnames if d not in EXCLUDE_DIRS)
         for fn in sorted(filenames):
@@ -193,11 +201,17 @@ def main() -> int:
                 continue
             path = os.path.join(dirpath, fn)
             rel = os.path.relpath(path, os.path.curdir)
-            print("════════ %s ════════" % rel, flush=True)
+            if not first:
+                print()
+            first = False
+            print("## %s" % rel, flush=True)
+            print()
+            # md files render as blockquotes, everything else as code blocks
+            as_md = os.path.splitext(fn)[1].lower() in MD_EXTS
             try:
-                sys.stdout.write(render_file(path, mask))
+                sys.stdout.write(render_file(path, mask, indent=not as_md))
             except Exception as e:  # never die on one file
-                print("  ⟨error: %s⟩" % e)
+                print("    ⟨error: %s⟩" % e)
     return 0
 
 
