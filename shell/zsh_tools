@@ -381,8 +381,8 @@ gitdo() {
     exec 3</dev/null                                                                                    
                                                                                                         
     find . -name .git -type d -prune | while read -r gitdir; do                                         
-        repo_dir=$(dirname "$gitdir" | sed 's|^\./||')                                                    
-        [ "$repo_dir" = "." ] && repo_dir="Корневая папка"                                                
+        repo_dir=$(dirname "$gitdir" | sed 's|^\./||')
+        [ "$repo_dir" = "." ] && continue
                                                                                                         
         branch=$(git -C "$(dirname "$gitdir")" branch --show-current 2>/dev/null)                         
                                                                      
