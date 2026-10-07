@@ -223,7 +223,7 @@ def resolve_model_details(model_id: str, data: ProviderData) -> dict | None:
     for ext in [".gguf", ".bin", ".mlx"]:
         if normalized.endswith(ext):
             normalized = normalized[: -len(ext)]
-    normalized = re.sub(r"_[A-Za-z0-9_]+$", "", normalized)
+    normalized = re.sub(r"[_:][A-Za-z0-9_]+$", "", normalized)
 
     # Прямой маппинг
     canonical_key = data.normalized_map.get(normalized)
@@ -1049,7 +1049,7 @@ def _parse_lmstudio_details(response_data: dict) -> tuple[dict, dict, dict]:
         for ext in [".gguf", ".bin", ".mlx"]:
             if normalized.endswith(ext):
                 normalized = normalized[: -len(ext)]
-        normalized = re.sub(r"_[A-Za-z0-9_]+$", "", normalized)
+        normalized = re.sub(r"[_:][A-Za-z0-9_]+$", "", normalized)
         normalized_map[normalized] = key
 
         # reverse_map: basename -> canonical_key
