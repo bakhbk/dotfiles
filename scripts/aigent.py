@@ -17,6 +17,9 @@
 - Ошибки API: retry x3 (паузы 3/5/10s) на network/429/5xx, 4xx — сразу ошибка.
 - Loop-защита включена по умолчанию. Отключение: --no-loop-guard
   или AIGENT_LOOP_GUARD=off.
+- Compact контекста (beta, off by default): AIGENT_COMPACT=on / --compact.
+  Средние tool-группы → structured summary с ref, оригиналы в
+  <AIGENT_DIR>/details/, возврат по tool get_details(ref), TTL.
 - Профиль thinking читается из ~/.config/dispatch/model-capabilities.yaml
   (per-model thinking/fallback_thinking, глобальный default_thinking).
   Override: --thinking NAME или AIGENT_THINKING=NAME.
@@ -414,6 +417,7 @@ VERBOSE = False
 QUIET = False
 NO_USAGE = False
 NO_TOOLS = False
+COMPACT_MGR = None  # aigent_compact.CompactManager | None (beta, off by default)
 LOG_FILE = ""
 _log_q: queue.Queue = queue.Queue()
 _log_thread: threading.Thread | None = None
@@ -749,6 +753,10 @@ def run_bash(command: str) -> str:
 
 
 def call_tool(name: str, arguments: dict) -> str:
+    if name == "get_details":
+        if COMPACT_MGR is None:
+            return "Error: get_details unavailable (compact disabled)"
+        return COMPACT_MGR.get_details(arguments)
     func = {"bash": run_bash, "view_image": run_view_image}.get(name)
     if not func:
         return f"Error: unknown tool '{name}'"
@@ -1056,6 +1064,7 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
     nudged = False
     _empty_nudged = False
     img_msgs: list = []  # [message, path, turn] — для TTL-эвикции картинок
+    cm = COMPACT_MGR
     turn = 0
     turns_stats = []
     try:
@@ -1068,6 +1077,8 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
             if expired:
                 img_msgs = [im for im in img_msgs if turn - im[2] <= IMAGE_TTL]
                 log(f"🖼️  evicted {len(expired)} image(s) from history")
+            if cm:
+                cm.tick(turn, messages)  # TTL-эвикция retrieved-контента
             if guard.stuck and not nudged:
                 status("🔁 no progress → asking for final answer")
                 log("🔁 watchdog fired: injecting nudge")
@@ -1083,11 +1094,15 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                 return 1
             log(f"───── turn {turn} ─────")
             emit, flush = _make_stream_logger(turn)
+            if cm:
+                cm.before_call(messages)  # join фонового compact
             try:
                 content, tool_calls, finish_reason, reasoning, stats = call_llm(
                     messages, on_delta=emit, guard=guard)
             finally:
                 flush()
+            if cm:
+                cm.after_turn(messages, stats.get("usage"))
             if finish_reason in ("length", "loop"):
                 # "length": модель не уложилась в max_tokens — просим продолжить.
                 # "loop": loop-guard поймал петлю в стриме — просим модель
@@ -1103,8 +1118,12 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                         am["reasoning_content"] = reasoning
                     messages.append(am)
                     messages.append({"role": "user", "content": guard.nudge(reason)})
+                    if cm:
+                        cm.before_call(messages)
                     content, tool_calls, finish_reason, reasoning, _stats = call_llm(
                         messages, guard=guard)
+                    if cm:
+                        cm.after_turn(messages, _stats.get("usage"))
                     _merge_stats(stats, _stats)
                     log(f"turn {turn}: continuation {cont}: content={len(content)}c "
                         f"finish={finish_reason}")
@@ -1209,6 +1228,9 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                                  "content": content})
                 if isinstance(content, list):
                     img_msgs.append([messages[-1], args.get("path", "?"), turn])
+                if cm and fn == "get_details":
+                    cm.track_retrieved(messages[-1],
+                                        str(args.get("ref", "?")), turn)
             guard.touch(tool_calls, content, reasoning)
 
         status(f"⚠️ max turns ({MAX_TURNS}) reached")
@@ -1225,10 +1247,12 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
         return 1
     finally:
         guard.stop()
+        if COMPACT_MGR is not None:
+            COMPACT_MGR.cleanup()
 
 
 def main() -> int:
-    global VERBOSE, QUIET, NO_USAGE, NO_TOOLS, LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL, LLM_API_KEY, MAX_TURNS, MAX_TOKENS, LLM_THINKING, LOOP_GUARD_ENABLED, THINKING_PROFILE, THINKING_PROFILE_NAME, LEVEL_ORDER
+    global VERBOSE, QUIET, NO_USAGE, NO_TOOLS, COMPACT_MGR, LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL, LLM_API_KEY, MAX_TURNS, MAX_TOKENS, LLM_THINKING, LOOP_GUARD_ENABLED, THINKING_PROFILE, THINKING_PROFILE_NAME, LEVEL_ORDER
     parser = argparse.ArgumentParser(description="LLM coding agent (v2)")
     parser.add_argument("prompt", nargs="?", help="Task description")
     parser.add_argument("-s", "--system-prompt", default=None,
@@ -1264,6 +1288,12 @@ def main() -> int:
                         help="Auto-create model-capabilities.yaml if missing")
     parser.add_argument("--no-loop-guard", action="store_true",
                         help="Disable loop-guard and watchdog entirely")
+    parser.add_argument("--compact", action="store_true",
+                        help="Enable context compaction (beta; AIGENT_COMPACT=on)")
+    parser.add_argument("--no-compact", action="store_true",
+                        help="Disable context compaction")
+    parser.add_argument("--compact-target", type=int, default=None,
+                        help="Override AIGENT_COMPACT_TARGET (prompt tokens)")
     parser.add_argument("--cwd", default=None,
                         help="Working directory for bash tool (default: current)")
     args = parser.parse_args()
@@ -1332,6 +1362,51 @@ def main() -> int:
         print(f"❌ {e}", file=sys.stderr)
         return 1
     status(f"🧠 thinking: {THINKING_PROFILE_NAME} (model={LLM_MODEL})")
+
+    # Context compaction (beta): env AIGENT_COMPACT / --compact / --no-compact.
+    # LLM_BASE_URL/key/model — уже финальные (env > providers.conf > defaults).
+    compact_on = os.getenv("AIGENT_COMPACT", "off").lower() == "on"
+    if args.compact:
+        compact_on = True
+    if args.no_compact:
+        compact_on = False
+    if compact_on:
+        if args.no_tools:
+            status("⚠️  --no-tools and compact conflict — compact disabled "
+                   "(get_details would be unavailable)")
+            compact_on = False
+        else:
+            try:
+                import aigent_compact
+                COMPACT_MGR = aigent_compact.make({
+                    "aigent_dir": AIGENT_DIR,
+                    "llm_base_url": LLM_BASE_URL,
+                    "llm_api_key": LLM_API_KEY,
+                    "llm_model": LLM_MODEL,
+                    "status": status, "log": log,
+                    "target": args.compact_target,
+                })
+                LLM_TOOLS.append({
+                    "type": "function",
+                    "function": {
+                        "name": "get_details",
+                        "description": ("Restore a compacted conversation group in full. "
+                                        "Use when a [CONTEXT COMPACTED] summary is not enough "
+                                        "and you need exact details (error text, file content). "
+                                        "The restored content is HISTORICAL, not a recent action, "
+                                        "and is evicted from history after a few turns — "
+                                        "extract what you need immediately."),
+                        "parameters": {"type": "object",
+                                       "properties": {
+                                           "ref": {"type": "string",
+                                                    "description": "Ref from a [CONTEXT COMPACTED] block."}
+                                       },
+                                       "required": ["ref"]}}})
+                status(f"📦 compact: on (target={COMPACT_MGR.cfg['target']} "
+                       f"hard={COMPACT_MGR.cfg['hard']} tail={COMPACT_MGR.cfg['tail_groups']})")
+            except Exception as e:
+                status(f"⚠️  compact init failed: {e} — continuing without")
+                COMPACT_MGR = None
 
     signal.signal(signal.SIGINT, _on_int)
     start_log()
