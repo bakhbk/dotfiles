@@ -34,6 +34,7 @@ import re
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -96,6 +97,9 @@ LLM_TIMEOUT = (10, 300)          # (connect, read)
 STREAM_STALL = 180               # сек без полезных токенов в стриме = генератор умер
 RETRY_DELAYS = (3, 5, 10)        # 3 retry
 MAX_TOOL_RESULT = 16_000         # обрезка tool-результата при отправке в LLM
+IMAGE_MAX_EDGE = int(os.getenv("AIGENT_IMAGE_MAX_EDGE", "1568"))    # resample-лимит, px
+IMAGE_B64_LIMIT = int(os.getenv("AIGENT_IMAGE_B64_LIMIT", "400000")) # больше → sips jpeg
+IMAGE_TTL = int(os.getenv("AIGENT_IMAGE_TTL", "1"))          # turn'ов, пока картинка живёт в истории
 
 AIGENT_DIR = os.getenv("AIGENT_DIR",
                        os.path.expanduser("~/.local/state/aigent"))
@@ -319,7 +323,8 @@ def _resolve_level(model: str, explicit: str | None, caps: dict) -> tuple[str, d
 SYSTEM_PROMPT = """\
 You are a coding agent. Your job is to help the user with programming tasks.
 
-You have access to ONE tool: `bash` — which executes shell commands and returns stdout/stderr.
+You have access to two tools: `bash` (executes shell commands, returns stdout/stderr)
+and `view_image` (returns an image file for viewing).
 
 You have a budget of {max_turns} turns for this task (one turn = one LLM call,
 which may include one or more bash calls). Plan accordingly.
@@ -340,7 +345,7 @@ same command — try a different approach or move on."""
 
 BASH_TAIL = """
 
-You have ONE tool: `bash` — it executes shell commands and returns stdout/stderr.
+You have two tools: `bash` (shell) and `view_image` (view an image file).
 Use it to read/write files and run commands.
 Budget: {max_turns} turns. Plan accordingly.
 
@@ -382,6 +387,22 @@ LLM_TOOLS = [
                                                  "description": "The bash command to execute."}
                                  },
                                  "required": ["command"]}
+                 }
+            },
+    {"type": "function",
+     "function": {"name": "view_image",
+                  "description": ("Read an image file and return it for viewing. "
+                                  "Formats: png, jpg, gif directly; heic, heif, tiff, bmp, avif, jp2 "
+                                  "are auto-converted. " 
+                                  f"The image stays in the conversation for the next {IMAGE_TTL} "
+                                  "turn(s), then is replaced with a placeholder — extract the "
+                                  "information you need immediately; call view_image again to re-view."),
+                  "parameters": {"type": "object",
+                                 "properties": {
+                                     "path": {"type": "string",
+                                              "description": "Path to the image file."}
+                                 },
+                                 "required": ["path"]}
                  }
             }]
 
@@ -728,7 +749,7 @@ def run_bash(command: str) -> str:
 
 
 def call_tool(name: str, arguments: dict) -> str:
-    func = {"bash": run_bash}.get(name)
+    func = {"bash": run_bash, "view_image": run_view_image}.get(name)
     if not func:
         return f"Error: unknown tool '{name}'"
     try:
@@ -745,14 +766,11 @@ def _clip(s: str, limit: int = MAX_TOOL_RESULT) -> str:
 
 
 # --------------------------------------------------------------------------
-# Images (перенесено из aigent.py)
+# Images (для tool view_image)
 # --------------------------------------------------------------------------
 
 IMAGE_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-              ".gif": "image/gif"}
-IMAGE_RE = re.compile(r"[\w./~-]+?\.(?:png|jpe?g|gif)", re.IGNORECASE)
-
-
+              ".gif": "image/gif", ".heic": "image/heic", ".heif": "image/heif"}
 def load_image(path: str) -> str | None:
     try:
         with open(path, "rb") as f:
@@ -764,24 +782,47 @@ def load_image(path: str) -> str | None:
     return f"data:{mime};base64,{b64}"
 
 
-def build_user_content(message: str) -> list | str:
-    """Извлекает пути к картинкам из промпта; возвращает multimodal content, иначе str."""
-    seen, paths = set(), []
-    for raw in IMAGE_RE.findall(message):
-        p = os.path.expanduser(raw)
-        if os.path.exists(p) and p not in seen:
-            seen.add(p)
-            paths.append((raw, p))
-    if not paths:
-        return message
-    text = message
-    images = []
-    for raw, p in paths:
-        text = text.replace(raw, f"[image: {p}]", 1)
-        url = load_image(p)
-        if url:
-            images.append({"type": "image_url", "image_url": {"url": url}})
-    return [{"type": "text", "text": text.strip()}] + images
+def _b64(path: str) -> str:
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode()
+
+
+def run_view_image(path: str) -> str:
+    """data-URL для модели. png/jpg/gif — напрямую; всё остальное (heic,
+    tiff, bmp, avif, jp2, …) → sips→PNG. Если base64 больше IMAGE_B64_LIMIT
+    — sips resample до IMAGE_MAX_EDGE + JPEG q85 (контекст не жрём)."""
+    p = os.path.expanduser(path)
+    ext = os.path.splitext(p)[1].lower()
+    if not os.path.exists(p):
+        return f"Error: no such file {path}"
+    if ext not in (".png", ".jpg", ".jpeg", ".gif"):
+        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        tmp.close()
+        r = subprocess.run(["sips", "-s", "format", "png", p, "--out", tmp.name],
+                           capture_output=True)
+        if r.returncode != 0:
+            os.unlink(tmp.name)
+            return f"Error: cannot convert {path}: {r.stderr.decode(errors='replace')[:200]}"
+        src, tmp_name = tmp.name, tmp.name
+    else:
+        src, tmp_name = p, None
+    try:
+        data = load_image(src)
+        if data is None:
+            return f"Error: cannot load image {path}"
+        if len(data) > IMAGE_B64_LIMIT:
+            out = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+            out.close()
+            r = subprocess.run(["sips", "-s", "format", "jpeg", "-s", "formatOptions", "85",
+                                "-Z", str(IMAGE_MAX_EDGE), src, "--out", out.name],
+                               capture_output=True)
+            if r.returncode == 0:
+                data = f"data:image/jpeg;base64,{_b64(out.name)}"
+            os.unlink(out.name)
+    finally:
+        if tmp_name:
+            os.unlink(tmp_name)
+    return data
 
 
 # --------------------------------------------------------------------------
@@ -1004,14 +1045,9 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
     log(f"🔗 provider={LLM_PROVIDER} {LLM_BASE_URL} model={LLM_MODEL}")
     log(f"prompt: {user_message}")
 
-    user_content = build_user_content(user_message)
-    if isinstance(user_content, list):
-        n = sum(1 for c in user_content if c.get("type") == "image_url")
-        log(f"🖼️  {n} image(s) attached")
-
     system_content = _compose_system_prompt(system_prompt, MAX_TURNS)
     messages = [{"role": "system", "content": system_content},
-                {"role": "user", "content": user_content}]
+                {"role": "user", "content": user_message}]
 
     last_content = ""
     guard = LoopGuard(enabled=LOOP_GUARD_ENABLED)
@@ -1019,10 +1055,19 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
     guard.touch([], "")
     nudged = False
     _empty_nudged = False
+    img_msgs: list = []  # [message, path, turn] — для TTL-эвикции картинок
     turn = 0
     turns_stats = []
     try:
         for turn in range(1, MAX_TURNS + 1):
+            # Картинка живёт в истории IMAGE_TTL turn'ов, дальше — плейсхолдер
+            expired = [im for im in img_msgs if turn - im[2] > IMAGE_TTL]
+            for im in expired:
+                im[0]["content"] = (f"[image from {im[1]} already shown — "
+                                    f"call view_image to see it again]")
+            if expired:
+                img_msgs = [im for im in img_msgs if turn - im[2] <= IMAGE_TTL]
+                log(f"🖼️  evicted {len(expired)} image(s) from history")
             if guard.stuck and not nudged:
                 status("🔁 no progress → asking for final answer")
                 log("🔁 watchdog fired: injecting nudge")
@@ -1152,11 +1197,18 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                 # в stdout — только при -v (полные аргументы), иначе — в файл
                 log(f"🔧 {fn}({arg_s})")
                 result = call_tool(fn, args)
-                log(f"turn {turn} ← {fn} [{len(result)}c]\n{result}")
+                if result.startswith("data:image/"):
+                    log(f"turn {turn} ← {fn} [image, {len(result)}c]")
+                    content = [{"type": "image_url", "image_url": {"url": result}}]
+                else:
+                    log(f"turn {turn} ← {fn} [{len(result)}c]\n{result}")
+                    content = _clip(result)
                 if VERBOSE:
                     print(f"   → {result[:500]}{'…' if len(result) > 500 else ''}")
                 messages.append({"role": "tool", "tool_call_id": tc["id"],
-                                 "content": _clip(result)})
+                                 "content": content})
+                if isinstance(content, list):
+                    img_msgs.append([messages[-1], args.get("path", "?"), turn])
             guard.touch(tool_calls, content, reasoning)
 
         status(f"⚠️ max turns ({MAX_TURNS}) reached")

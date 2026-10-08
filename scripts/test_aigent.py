@@ -1,3 +1,4 @@
+# Usage: uv run --with pytest pytest ./scripts/test_aigent.py -q
 """Unit-тесты для loop-детектора в _consume_stream.
 
 Детектор смотрит и на reasoning, и на content. Проверяются четыре сценария:
