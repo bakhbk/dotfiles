@@ -2,7 +2,7 @@
 # /// script
 # dependencies = []
 # ///
-# Запуск: uv run ~/dotfiles/scripts/extract-frames.py /path/to/video.mp4 --count 10
+# Запуск: uv run ~/dotfiles/scripts/converters/extract-frames.py /path/to/video.mp4 --count 10
 """Извлекает N равномерно распределённых кадров из видеофайла через ffmpeg.
 
 Сохраняет кадры в ту же директорию, что и исходное видео:
