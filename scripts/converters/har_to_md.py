@@ -10,8 +10,9 @@ Designed for safely pasting network logs into an AI chat.
 Masks values that look sensitive (tokens, passwords, cookies) by default.
 
 Usage:
-    uv run har_to_md.py input.har                      # to stdout
-    uv run har_to_md.py input.har -o digest.md         # to file
+    uv run har_to_md.py input.har                      # writes input.md next to the file
+    uv run har_to_md.py input.har -o digest.md         # to a specific file
+    uv run har_to_md.py input.har --stdout             # print to stdout (for pipes)
     uv run har_to_md.py input.har --max-body 8000 --no-mask
     uv run har_to_md.py input.har --method POST        # filter entries
     uv run har_to_md.py input.har --url auth          # filter by URL substring
@@ -149,7 +150,8 @@ def render_entry(e: dict, no_mask: bool, max_body: int) -> list[str]:
 def main() -> int:
     p = argparse.ArgumentParser(description="Convert HAR file to a Markdown document")
     p.add_argument("har_file", type=Path)
-    p.add_argument("-o", "--output", type=Path, help="write to file instead of stdout")
+    p.add_argument("-o", "--output", type=Path, default=None, help="output file (default: <input>.md next to the input)")
+    p.add_argument("--stdout", action="store_true", help="print to stdout instead of writing a file")
     p.add_argument("--max-body", type=int, default=4000, help="max body chars per entry (default 4000)")
     p.add_argument("--no-mask", action="store_true", help="do not mask sensitive values")
     p.add_argument("--method", help="only entries with this HTTP method (e.g. POST)")
@@ -189,11 +191,12 @@ def main() -> int:
         lines.append("")
 
     text = "\n".join(lines)
-    if args.output:
-        args.output.write_text(text)
-        print(f"wrote {args.output} ({len(text)} chars, {len(entries)} entries)")
-    else:
+    if args.stdout:
         print(text)
+    else:
+        out = args.output or args.har_file.with_suffix(".md")
+        out.write_text(text)
+        print(f"wrote {out} ({len(text)} chars, {len(entries)} entries)")
     return 0
 
 
