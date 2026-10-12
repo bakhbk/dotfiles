@@ -17,7 +17,7 @@
 - Ошибки API: retry x3 (паузы 3/5/10s) на network/429/5xx, 4xx — сразу ошибка.
 - Loop-защита включена по умолчанию. Отключение: --no-loop-guard
   или AIGENT_LOOP_GUARD=off.
-- Compact контекста (beta, off by default): AIGENT_COMPACT=on / --compact.
+- Compact контекста (beta, default = COMPACT_DEFAULT): AIGENT_COMPACT=off / --no-compact для отключения.
   Средние tool-группы → structured summary с ref, оригиналы в
   <AIGENT_DIR>/details/, возврат по tool get_details(ref), TTL.
 - Профиль thinking читается из ~/.config/dispatch/model-capabilities.yaml
@@ -417,7 +417,8 @@ VERBOSE = False
 QUIET = False
 NO_USAGE = False
 NO_TOOLS = False
-COMPACT_MGR = None  # aigent_compact.CompactManager | None (beta, off by default)
+COMPACT_MGR = None  # aigent_compact.CompactManager | None
+COMPACT_DEFAULT = "on"  # single source of truth for compact on/off default
 LOG_FILE = ""
 _log_q: queue.Queue = queue.Queue()
 _log_thread: threading.Thread | None = None
@@ -1289,7 +1290,7 @@ def main() -> int:
     parser.add_argument("--no-loop-guard", action="store_true",
                         help="Disable loop-guard and watchdog entirely")
     parser.add_argument("--compact", action="store_true",
-                        help="Enable context compaction (beta; AIGENT_COMPACT=on)")
+                        help=f"Enable context compaction (beta; AIGENT_COMPACT={COMPACT_DEFAULT} by default)")
     parser.add_argument("--no-compact", action="store_true",
                         help="Disable context compaction")
     parser.add_argument("--compact-target", type=int, default=None,
@@ -1363,9 +1364,9 @@ def main() -> int:
         return 1
     status(f"🧠 thinking: {THINKING_PROFILE_NAME} (model={LLM_MODEL})")
 
-    # Context compaction (beta): env AIGENT_COMPACT / --compact / --no-compact.
+    # Context compaction (beta): default = COMPACT_DEFAULT; env AIGENT_COMPACT / --compact / --no-compact.
     # LLM_BASE_URL/key/model — уже финальные (env > providers.conf > defaults).
-    compact_on = os.getenv("AIGENT_COMPACT", "off").lower() == "on"
+    compact_on = os.getenv("AIGENT_COMPACT", COMPACT_DEFAULT).lower() == "on"
     if args.compact:
         compact_on = True
     if args.no_compact:

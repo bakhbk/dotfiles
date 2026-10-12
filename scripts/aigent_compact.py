@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""aigent context compaction + on-demand retrieval (BETA, off by default).
+"""aigent context compaction + on-demand retrieval (BETA, on by default).
 
 Three-zone context:
   HEAD   system + first user task              — never compacted
