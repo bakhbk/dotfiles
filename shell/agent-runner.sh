@@ -7,6 +7,14 @@ _skill_template="$HOME/.agents/skills/agent-runner/SKILL.md"
 _prompt_template="$HOME/.agents/prompts/load-agent-skill.template.md"
 
 # ---------------------------------------------------------------
+# __session_name — ID сессии: YYYYMMDD-HHMMSS-<tag>
+# (хронологическая сортировка по имени; используется gar и load-skill)
+# ---------------------------------------------------------------
+__session_name() {
+    date +"%Y%m%d-%H%M%S-$1"
+}
+
+# ---------------------------------------------------------------
 # __pick_agent — fzf выбор агента из config.json
 # Возвращает имя агента (stdout) или 1 при сбое
 # ---------------------------------------------------------------
@@ -102,8 +110,10 @@ __render_skill_md() {
         return 1
     fi
 
+    local rendered_md
+
     if [ -z "$system_prompt_flag" ]; then
-        python3 -c "
+        rendered_md=$(python3 -c "
 import re, sys
 template = open(sys.argv[1]).read()
 template = re.sub(r'## System Prompt Control\n.*?(?=## Rules)', '', template, flags=re.DOTALL)
@@ -112,9 +122,9 @@ template = template.replace('{{INVOCATION}}', sys.argv[3])
 template = template.replace('{{PROMPT_PREFIX}}', sys.argv[4])
 template = template.replace('{{SESSION_UUID}}', sys.argv[5])
 print(template, end='')
-" "$_skill_template" "$agent" "$invocation" "$prompt_prefix" "$uuid"
+" "$_skill_template" "$agent" "$invocation" "$prompt_prefix" "$uuid")
     else
-        python3 -c "
+        rendered_md=$(python3 -c "
 import sys
 template = open(sys.argv[1]).read()
 template = template.replace('{{AGENT_NAME}}', sys.argv[2])
@@ -123,8 +133,14 @@ template = template.replace('{{SYSTEM_PROMPT_FLAG}}', sys.argv[4])
 template = template.replace('{{PROMPT_PREFIX}}', sys.argv[5])
 template = template.replace('{{SESSION_UUID}}', sys.argv[6])
 print(template, end='')
-" "$_skill_template" "$agent" "$invocation" "$system_prompt_flag" "$prompt_prefix" "$uuid"
+" "$_skill_template" "$agent" "$invocation" "$system_prompt_flag" "$prompt_prefix" "$uuid")
     fi
+
+    # Persist rendered SKILL.md to session dir (shared by gar and load-skill)
+    printf '%s\n' "$rendered_md" > "$HOME/.cache/agent-runner/$uuid/skill.md" 2>/dev/null
+    echo "✓ Saved to $HOME/.cache/agent-runner/$uuid/skill.md" >&2
+
+    printf '%s\n' "$rendered_md"
 }
 
 # ---------------------------------------------------------------
@@ -155,6 +171,7 @@ gar() {
     local dry_run_mode=false
     local help_mode=false
     local task=""
+    local session_id=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -163,18 +180,20 @@ gar() {
             -d|--dry-run) dry_run_mode=true; shift ;;
             -r|--run)    run_mode=true; shift; task="$*"; break ;;
             -h|--help)   help_mode=true; shift ;;
+            -s|--session)  [[ -n "${2:-}" ]] || { echo "❌ -s requires a value" >&2; return 1; }; session_id="$2"; shift 2 ;;
             *)           shift ;;
         esac
     done
 
     # Show help if requested
     if $help_mode; then
-        echo "Usage: gar [-e|-d|-r \"task\"]"
+        echo "Usage: gar [-s <id>|-e|-d|-r \"task\"]"
         echo ""
         echo "Options:"
         echo "  -e, --edit      Open rendered SKILL.md in \$EDITOR, then copy to clipboard"
         echo "  -d, --dry-run   Show rendered SKILL.md in terminal (no clipboard)"
         echo "  -r, --run \"task\" Render and pass directly to pi with task"
+        echo "  -s, --session <id>  Name the session YYYYMMDD-HHMMSS-<id> (same as load-skill)"
         echo "  -h, --help      Show this help message"
         echo ""
         echo 'Config: ~/.config/agent-runner/config.json'
@@ -200,9 +219,10 @@ gar() {
     [ -z "$agent" ] && return
     echo "✓ Selected agent: $agent" >&2
 
-    # Render SKILL.md
-    local rendered
-    rendered=$(__render_skill_md "$agent") || return
+    # Render SKILL.md (session: -s <id> → timestamped name, else random uuid)
+    local rendered session_name=""
+    [[ -n "$session_id" ]] && session_name=$(__session_name "$session_id")
+    rendered=$(__render_skill_md "$agent" "${session_name:-}") || return
 
     # Записываем в темп-файл (pbcopy падает на больших текстах из echo)
     local tmp_file
@@ -258,6 +278,7 @@ load-skill() {
     local dry_run_mode=false
     local help_mode=false
     local skills=()
+    local session_tag=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -265,11 +286,12 @@ load-skill() {
             -e|--edit)   edit_mode=true; shift ;;
             -d|--dry-run) dry_run_mode=true; shift ;;
             -h|--help)
-                echo "Usage: load-skill [-e|-d] [SKILL_NAME...]"
+                echo "Usage: load-skill -s <id> [-e|-d] [SKILL_NAME...]"
                 echo ""
                 echo "Assembles a mega-prompt: Agent SKILL.md (generated on the fly) + optional skill dirs."
                 echo ""
                 echo "Options:"
+                echo "  -s, --session <id>  Session/ticket id, required (used in session dir name)"
                 echo "  -e, --edit      Open mega-prompt in \$EDITOR"
                 echo "  -d, --dry-run   Show in terminal (no clipboard)"
                 echo "  -h, --help      Show this help"
@@ -278,9 +300,13 @@ load-skill() {
                 echo "Optional SKILL_NAME args refer to real skill directories under"
                 echo "  ~/.agents/skills/<agent>/"
                 return 0 ;;
+            -s|--session)  [[ -n "${2:-}" ]] || { echo "❌ -s requires a value" >&2; return 1; }; session_tag="$2"; shift 2 ;;
             *) skills+=("$1"); shift ;;
         esac
     done
+
+    # Session tag is mandatory
+    [[ -n "$session_tag" ]] || { echo "❌ Session is required: load-skill -s <id>" >&2; return 1; }
 
     # Pick agent via fzf
     local agent
@@ -288,17 +314,10 @@ load-skill() {
     [ -z "$agent" ] && return
     echo "✓ Selected agent: $agent" >&2
 
-    # Generate UUID for session dir (shared between gar and load-skill)
-    local uuid
-    if command -v uuidgen >/dev/null 2>&1; then
-        uuid=$(uuidgen | cut -c1-8)
-    elif command -v date >/dev/null 2>&1; then
-        uuid=$(date +%s | cut -c1-8)
-    else
-        echo "❌ Cannot generate session ID (no uuidgen or date)" >&2
-        return 1
-    fi
-    [ -z "$uuid" ] && { echo "❌ Failed to generate a valid UUID" >&2; return 1; }
+    # Generate timestamped ID for session dir (shared between gar and load-skill)
+    local session_name
+    session_name=$(__session_name "$session_tag")
+    [ -z "$session_name" ] && { echo "❌ Failed to generate session name" >&2; return 1; }
 
     # Validate required tools before proceeding
     if ! command -v python3 >/dev/null 2>&1; then
@@ -306,9 +325,9 @@ load-skill() {
         return 1
     fi
 
-    # Render agent SKILL.md (generated on the fly — pass UUID)
+    # Render agent SKILL.md (generated on the fly — pass session name)
     local rendered_skill_md
-    rendered_skill_md=$(__render_skill_md "$agent" "$uuid") || return
+    rendered_skill_md=$(__render_skill_md "$agent" "$session_name") || return
 
     # Build skills section from optional named skill directories
     local tmpdir
@@ -365,7 +384,7 @@ print(template, end='')
     printf '%s\n' "$mega_prompt" > "$tmp_file"
 
     # Save to session directory (so gar can read it back)
-    local session_dir="$HOME/.cache/agent-runner/$uuid"
+    local session_dir="$HOME/.cache/agent-runner/$session_name"
     mkdir -p "$session_dir" 2>/dev/null
     cp "$tmp_file" "$session_dir/mega-prompt.md"
     echo "✓ Saved to $session_dir/mega-prompt.md" >&2
