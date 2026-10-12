@@ -76,7 +76,7 @@ if [[ $USE_OH_MY_ZSH == "true" ]]; then
     # echo 'USE_OH_MY_ZSH user ' $USE_OH_MY_ZSH
 else 
     # echo 'USE_OH_MY_ZSH NOT used ' $USE_OH_MY_ZSH
-    source ~/.dotfiles/shell/shell_prompt
+    source ~/.dotfiles/shell_prompt
 fi
 
 # fzf is a general-purpose command-line fuzzy finder.

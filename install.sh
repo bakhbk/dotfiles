@@ -5,6 +5,9 @@
 
 set -euxo pipefail
 
+# Запуск из любой директории: переходим в корень dotfiles
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Запуск bootstrap с подтверждением в начале
 read -p "Запустить ./scripts/bootstrap.sh --install? [y/N]: " confirm
 RUN_BOOTSTRAP=false
@@ -46,7 +49,12 @@ CONFIGS_HOME_DIR=(
 
 if [ $# -eq 0 ]; then
   for i in "${CONFIGS_HOME_DIR[@]}"; do
-    cp -rvf "${i}" ~/
+    if [ "$i" = "shell/.zshrc" ]; then
+      # Собираем .zshrc с флагом oh-my-zsh (иначе ветка if в .zshrc не сработает)
+      { printf "export USE_OH_MY_ZSH='true'\n"; cat shell/minimal.zshrc; cat shell/.zshrc; } > ~/.zshrc
+    else
+      cp -rvf "${i}" ~/
+    fi
   done
   for i in "${CONFIGS[@]}"; do
     mkdir -p ~/.dotfiles
