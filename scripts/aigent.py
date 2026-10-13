@@ -1362,7 +1362,7 @@ def main() -> int:
     except ThinkingLevelError as e:
         print(f"❌ {e}", file=sys.stderr)
         return 1
-    status(f"🧠 thinking: {THINKING_PROFILE_NAME} (model={LLM_MODEL})")
+    status(f"🧠 thinking: {THINKING_PROFILE_NAME}")
 
     # Context compaction (beta): default = COMPACT_DEFAULT; env AIGENT_COMPACT / --compact / --no-compact.
     # LLM_BASE_URL/key/model — уже финальные (env > providers.conf > defaults).
