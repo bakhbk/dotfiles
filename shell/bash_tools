@@ -28,6 +28,22 @@ aigent() {
 
     unset LLM_BASE_URL LLM_API_KEY LLM_MODEL
 
+    local conf="$HOME/.config/dispatch/providers.conf"
+    if [ ! -f "$conf" ]; then
+        echo "Error: $conf not found"
+        return 1
+    fi
+    local url key model
+    url=$(awk '/\[Gateway\]/{f=1} f&&/^url=/{sub(/^url=/,""); print; exit}' "$conf")
+    key=$(awk '/\[Gateway\]/{f=1} f&&/^key=/{sub(/^key=/,""); print; exit}' "$conf")
+    model=$(awk '/\[Gateway\]/{f=1} f&&/^last_model=/{sub(/^last_model=/,""); sub(/\.gguf$/,"",$0); sub(/-Q[0-9]*_K.*/,""); print; exit}' "$conf")
+    echo $model
+    if [ -z "$url" ] || [ -z "$key" ]; then
+        echo "Error: url/key not found in $conf"
+        return 1
+    fi
+    export LLM_BASE_URL="$url" LLM_API_KEY="$key" LLM_MODEL="$model"
+
     if [ -n "$custom_system_prompt" ]; then
         (cd ~/dotfiles/scripts && uv run ./aigent.py -s "$custom_system_prompt" "${task_args[@]}")
     else
