@@ -64,8 +64,15 @@ gw() {
       git worktree remove "${_f[@]}" "${dir}${name}"
       ;;
     go)
-      cd "${dir}${1:-}" || return 1
-      ;;
+      local arg=${1:-}
+      [[ -z $arg ]] && { print -u2 "gw: name required"; return 1; }
+      local path=$arg
+      case $arg in /?*|.|./?*|../?*) path=$arg ;; *) path=${dir}${arg} ;; esac
+      if [[ -d $path ]]; then cd "$path"; return 0; fi
+      local target
+      target=$(git worktree list --porcelain | awk -v n="$arg" '/^worktree /{p=$2} /^branch /{sub(/^refs\/heads\//,"",$2); if (p ~ n || $2 ~ n) print p}' | head -1)
+      [[ -n $target ]] && { cd "$target"; return 0; }
+      print -u2 "gw: worktree not found: $arg"; return 1 ;;
     l|ls|list)
       git worktree list
       ;;
