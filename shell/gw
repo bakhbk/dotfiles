@@ -1,0 +1,100 @@
+# gw — git worktree short form
+#
+# Conventions:
+#   worktree path  : ${GW_DIR:-../}<name>   (sibling of the main clone)
+#   default branch : ${GW_BRANCH:-feature/}<name>  (override: gw a cbc-1 hotfix/cbc-1)
+#
+# Usage (run from inside the main clone):
+#   gw a cbc-1               create ../cbc-1 @ feature/cbc-1
+#   gw rm -f cbc-1           remove ../cbc-1
+#   gw go cbc-1              cd into ../cbc-1
+#   gw l                     list worktrees
+#   gw mv cbc-1 <path>       move worktree
+#   gw lock|unlock|repair    protect / unprotect / fix link
+#   gw p                     prune records of worktrees removed by hand
+#   gw h | --help            this help
+#
+# Flags may be placed before or after the name: gw rm -f cbc-1 = gw rm cbc-1 -f
+
+gw_help() {
+  cat <<'EOF'
+usage: gw <cmd> <name> [args]
+
+  a | add <name> [branch] create ../<name> @ [branch|feature/<name>]
+  rm | remove [-f] <name> remove ../<name>
+  go <name>              cd into ../<name>
+  l                      list worktrees
+  mv <name> <path>       move worktree
+  lk | lock <name>       protect from accidental remove (--reason <why>)
+  unl | unlock <name>    unprotect
+  rpr | repair <name>    fix link after manual dir move
+  p | prune              prune records of worktrees removed by hand
+  h | --help             this help
+
+  env:    GW_DIR=../            worktree dir prefix
+          GW_BRANCH=feature/    default branch prefix
+  flags:  any git flag passes through  (gw a -f <name>, gw rm -f <name>)
+EOF
+}
+
+gw() {
+  local dir="${GW_DIR:-../}"
+  local branch_prefix="${GW_BRANCH:-feature/}"
+  if [[ $# -eq 0 ]]; then gw_help; return 0; fi
+  case $1 in h|-h|--help) gw_help; return 0 ;; esac
+  local cmd=$1; shift
+
+  # NOTE: flag loop is inlined per branch (zsh passes a COPY of $@ to
+  # sub-functions, so shift in a helper would not affect $1 here)
+  case $cmd in
+    a|add)
+      local _f=()
+      while [[ $# -gt 0 && $1 == -* ]]; do _f+=($1); shift; done
+      local name=${1:-}
+      [[ -n $name ]] || { print -u2 "gw: name required"; return 1; }
+      local branch=${2:-${branch_prefix}${name}}
+      git worktree add "${_f[@]}" "${dir}${name}" -b "$branch" || return
+      print -u2 "ok: ${dir}${name} @ ${branch}"
+      ;;
+    rm|remove)
+      local _f=()
+      while [[ $# -gt 0 && $1 == -* ]]; do _f+=($1); shift; done
+      local name=${1:-}
+      [[ -n $name ]] || { print -u2 "gw: name required"; return 1; }
+      git worktree remove "${_f[@]}" "${dir}${name}"
+      ;;
+    go)
+      cd "${dir}${1:-}" || return 1
+      ;;
+    l|ls|list)
+      git worktree list
+      ;;
+    mv|move)
+      [[ -n ${2:-} ]] || { print -u2 "gw: new path required"; return 1; }
+      git worktree move "${dir}${1}" "$2"
+      ;;
+    lk|lock)
+      local _f=()
+      while [[ $# -gt 0 && $1 == -* ]]; do _f+=($1); shift; done
+      git worktree lock "${_f[@]}" "${dir}${1:-}"
+      ;;
+    unl|unlock)
+      local _f=()
+      while [[ $# -gt 0 && $1 == -* ]]; do _f+=($1); shift; done
+      git worktree unlock "${_f[@]}" "${dir}${1:-}"
+      ;;
+    rpr|repair)
+      local _f=()
+      while [[ $# -gt 0 && $1 == -* ]]; do _f+=($1); shift; done
+      git worktree repair "${_f[@]}" "${dir}${1:-}"
+      ;;
+    p|prune)
+      local _f=()
+      while [[ $# -gt 0 && $1 == -* ]]; do _f+=($1); shift; done
+      git worktree prune "${_f[@]}"
+      ;;
+    *)
+      gw_help >&2; return 1
+      ;;
+  esac
+}

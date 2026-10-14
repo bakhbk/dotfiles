@@ -22,6 +22,7 @@ CONFIGS=(
   shell/bash_tools
   shell/zsh_aliases
   shell/zsh_tools
+  shell/gw
   shell/agent-runner.sh
   shell/zshenv
   shell/.zshrc
