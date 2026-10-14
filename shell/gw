@@ -31,8 +31,11 @@ usage: gw add <name> [branch]   create \${GW_DIR:-../}<name> @ [branch|feature/<
        gw -v ...                debug trace
 
   env:  GW_DIR=../  GW_BRANCH=feature/  GW_DEBUG=1
+
+  ---------------------------------------------------------------------
+
 EOF
-      return 0 ;;
+      git worktree -h ;;
     a|add)
       local name=$1
       local branch=${2:-${GW_BRANCH:-feature/}${name}}
@@ -40,7 +43,13 @@ EOF
       print -u2 "ok: ${GW_DIR:-../}${name} @ ${branch}"
       ;;
     rm)
-      git worktree remove $@ ;;
+      local _f=() _n=()
+      for x in "$@"; do [[ $x == -* ]] && _f+=($x) || _n+=($x); done
+      local args=(${_f[@]})
+      for n in ${_n[@]}; do
+        [[ $n == (/?|./?*|../?*) ]] && args+=($n) || args+=("${GW_DIR:-../}${n}")
+      done
+      git worktree remove ${args[@]} ;;
     go)
       cd "$1" || return 1 ;;
     *)
