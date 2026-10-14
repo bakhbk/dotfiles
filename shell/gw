@@ -1,107 +1,49 @@
-# gw — git worktree short form
+# gw — git worktree helper (simple version)
 #
-# Conventions:
-#   worktree path  : ${GW_DIR:-../}<name>   (sibling of the main clone)
-#   default branch : ${GW_BRANCH:-feature/}<name>  (override: gw a cbc-1 hotfix/cbc-1)
+#   gw add <name> [branch]  →  git worktree add ../<name> -b [branch|feature/<name>]
+#                              (dir prefix: GW_DIR, branch prefix: GW_BRANCH)
+#   gw go <path>            →  cd <path> (as given, no prefix)
+#   gw <anything else>      →  git worktree <anything else>   (pure proxy, verbatim)
+#   gw -v ... | GW_DEBUG=1  →  trace (set -x)
 #
-# Usage (run from inside the main clone):
-#   gw a cbc-1               create ../cbc-1 @ feature/cbc-1
-#   gw rm -f cbc-1           remove ../cbc-1
-#   gw go cbc-1              cd into ../cbc-1
-#   gw l                     list worktrees
-#   gw mv cbc-1 <path>       move worktree
-#   gw lock|unlock|repair    protect / unprotect / fix link
-#   gw p                     prune records of worktrees removed by hand
-#   gw h | --help            this help
-#
-# Flags may be placed before or after the name: gw rm -f cbc-1 = gw rm cbc-1 -f
-
-gw_help() {
-  cat <<'EOF'
-usage: gw <cmd> <name> [args]
-
-  a | add <name> [branch] create ../<name> @ [branch|feature/<name>]
-  rm | remove [-f] <name> remove ../<name>
-  go <name>              cd into ../<name>
-  l                      list worktrees
-  mv <name> <path>       move worktree
-  lk | lock <name>       protect from accidental remove (--reason <why>)
-  unl | unlock <name>    unprotect
-  rpr | repair <name>    fix link after manual dir move
-  p | prune              prune records of worktrees removed by hand
-  h | --help             this help
-
-  env:    GW_DIR=../            worktree dir prefix
-          GW_BRANCH=feature/    default branch prefix
-  flags:  any git flag passes through  (gw a -f <name>, gw rm -f <name>)
-EOF
-}
+# Examples:
+#   gw add cbc-1                        ../cbc-1 @ feature/cbc-1
+#   gw add cbc-1 hotfix/cbc-1           ../cbc-1 @ hotfix/cbc-1
+#   gw list
+#   gw remove -f ../cbc-1               (full git syntax: 'remove', not 'rm')
+#   gw go ../cbc-1
 
 gw() {
-  local dir="${GW_DIR:-../}"
-  local branch_prefix="${GW_BRANCH:-feature/}"
-  if [[ $# -eq 0 ]]; then gw_help; return 0; fi
-  case $1 in h|-h|--help) gw_help; return 0 ;; esac
-  local cmd=$1; shift
+  if [[ ${GW_DEBUG:-} == 1 || $1 == -v || $1 == --verbose ]]; then
+    set -x
+    [[ $1 == -v || $1 == --verbose ]] && shift
+  fi
 
-  # NOTE: flag loop is inlined per branch (zsh passes a COPY of $@ to
-  # sub-functions, so shift in a helper would not affect $1 here)
+  local cmd=${1:-h}
+  [[ $# -gt 0 ]] && shift
+
   case $cmd in
+    h|-h|--help)
+      cat <<EOF
+usage: gw add <name> [branch]   create \${GW_DIR:-../}<name> @ [branch|feature/<name>]
+       gw go <path>             cd into <path> (as given)
+       gw <cmd> [args]          proxy → git worktree <cmd> [args]   (list/remove/prune/lock/...)
+       gw -v ...                debug trace
+
+  env:  GW_DIR=../  GW_BRANCH=feature/  GW_DEBUG=1
+EOF
+      return 0 ;;
     a|add)
-      local _f=()
-      while [[ $# -gt 0 && $1 == -* ]]; do _f+=($1); shift; done
-      local name=${1:-}
-      [[ -n $name ]] || { print -u2 "gw: name required"; return 1; }
-      local branch=${2:-${branch_prefix}${name}}
-      git worktree add "${_f[@]}" "${dir}${name}" -b "$branch" || return
-      print -u2 "ok: ${dir}${name} @ ${branch}"
+      local name=$1
+      local branch=${2:-${GW_BRANCH:-feature/}${name}}
+      git worktree add "${GW_DIR:-../}${name}" -b "$branch" "${@:3}" || return
+      print -u2 "ok: ${GW_DIR:-../}${name} @ ${branch}"
       ;;
-    rm|remove)
-      local _f=()
-      while [[ $# -gt 0 && $1 == -* ]]; do _f+=($1); shift; done
-      local name=${1:-}
-      [[ -n $name ]] || { print -u2 "gw: name required"; return 1; }
-      git worktree remove "${_f[@]}" "${dir}${name}"
-      ;;
+    rm)
+      git worktree remove $@ ;;
     go)
-      local arg=${1:-}
-      [[ -z $arg ]] && { print -u2 "gw: name required"; return 1; }
-      local path=$arg
-      case $arg in /?*|.|./?*|../?*) path=$arg ;; *) path=${dir}${arg} ;; esac
-      if [[ -d $path ]]; then cd "$path"; return 0; fi
-      local target
-      target=$(git worktree list --porcelain | awk -v n="$arg" '/^worktree /{p=$2} /^branch /{sub(/^refs\/heads\//,"",$2); if (p ~ n || $2 ~ n) print p}' | head -1)
-      [[ -n $target ]] && { cd "$target"; return 0; }
-      print -u2 "gw: worktree not found: $arg"; return 1 ;;
-    l|ls|list)
-      git worktree list
-      ;;
-    mv|move)
-      [[ -n ${2:-} ]] || { print -u2 "gw: new path required"; return 1; }
-      git worktree move "${dir}${1}" "$2"
-      ;;
-    lk|lock)
-      local _f=()
-      while [[ $# -gt 0 && $1 == -* ]]; do _f+=($1); shift; done
-      git worktree lock "${_f[@]}" "${dir}${1:-}"
-      ;;
-    unl|unlock)
-      local _f=()
-      while [[ $# -gt 0 && $1 == -* ]]; do _f+=($1); shift; done
-      git worktree unlock "${_f[@]}" "${dir}${1:-}"
-      ;;
-    rpr|repair)
-      local _f=()
-      while [[ $# -gt 0 && $1 == -* ]]; do _f+=($1); shift; done
-      git worktree repair "${_f[@]}" "${dir}${1:-}"
-      ;;
-    p|prune)
-      local _f=()
-      while [[ $# -gt 0 && $1 == -* ]]; do _f+=($1); shift; done
-      git worktree prune "${_f[@]}"
-      ;;
+      cd "$1" || return 1 ;;
     *)
-      gw_help >&2; return 1
-      ;;
+      git worktree $cmd $@ ;;
   esac
 }
