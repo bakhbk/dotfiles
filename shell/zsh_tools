@@ -535,6 +535,19 @@ krbot() {
 }
 
 
+# Show project tree with gitignore-aware filtering
+# Usage: t [dir] [depth] [--all]   (defaults: . 2)
+t() {
+  local dir="${1:-.}"
+  local depth="${2:-2}"
+  local gitignore="--gitignore"
+  [[ "${3:-}" == "--all" ]] && gitignore=""
+  tree "$dir" -L "$depth" $gitignore \
+    -I "node_modules|dist|build|__pycache__|\.venv|\.next|\.cache|coverage|\.git|\.DS_Store|vendor|target|Pods|\.gradle" \
+    -h -F
+}
+
+
 # Select a file via fzf (preview: first 75 lines, truncated to 250 chars), print its path,
 # and copy its CONTENTS to the system clipboard (pbcopy/wl-copy/xclip).
 # Usage: fs [-e] [dir-or-glob]   (default: ~/.agents/prompts)
