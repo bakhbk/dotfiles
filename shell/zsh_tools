@@ -536,15 +536,28 @@ krbot() {
 
 
 # Show project tree with gitignore-aware filtering
-# Usage: t [dir] [depth] [--all]   (defaults: . 2)
+# Usage: t [dir] [depth] [tree flags...]   (defaults: . 2)
+#   --all  : show gitignored files too
+#   extra flags (e.g. -h, -C, -d) are passed through to tree
 t() {
   local dir="${1:-.}"
   local depth="${2:-2}"
   local gitignore="--gitignore"
-  [[ "${3:-}" == "--all" ]] && gitignore=""
+  local -a extra=()
+
+  (( $# >= 2 )) && shift 2
+  (( $# >= 1 )) && shift
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --all) gitignore=""; shift ;;
+      *)     extra+=("$1"); shift ;;
+    esac
+  done
+
   tree "$dir" -L "$depth" $gitignore \
     -I "node_modules|dist|build|__pycache__|\.venv|\.next|\.cache|coverage|\.git|\.DS_Store|vendor|target|Pods|\.gradle" \
-    -h -F
+    -F "${extra[@]}"
 }
 
 
