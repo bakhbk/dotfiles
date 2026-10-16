@@ -102,7 +102,7 @@ RETRY_DELAYS = (3, 5, 10)        # 3 retry
 MAX_TOOL_RESULT = 16_000         # обрезка tool-результата при отправке в LLM
 IMAGE_MAX_EDGE = int(os.getenv("AIGENT_IMAGE_MAX_EDGE", "1568"))    # resample-лимит, px
 IMAGE_B64_LIMIT = int(os.getenv("AIGENT_IMAGE_B64_LIMIT", "400000")) # больше → sips jpeg
-IMAGE_TTL = int(os.getenv("AIGENT_IMAGE_TTL", "1"))          # turn'ов, пока картинка живёт в истории
+IMAGE_TTL = int(os.getenv("AIGENT_IMAGE_TTL", "20"))          # turn'ов, пока картинка живёт в истории
 
 AIGENT_DIR = os.getenv("AIGENT_DIR",
                        os.path.expanduser("~/.local/state/aigent"))
@@ -982,6 +982,10 @@ class LoopGuard:
     def touch(self, tool_calls, content, reasoning=""):
         if not self.enabled:
             return
+        if isinstance(content, list):  # some providers return list of parts
+            content = "".join(p.get("text", "") if isinstance(p, dict) else repr(p) for p in content)
+        if isinstance(reasoning, list):
+            reasoning = "".join(p.get("text", "") if isinstance(p, dict) else repr(p) for p in reasoning)
         sig = hashlib.md5(
             (repr([(tc["function"]["name"], tc["function"]["arguments"])
                    for tc in tool_calls])[:2000]
