@@ -213,17 +213,26 @@ CAPABILITIES_DEFAULTS = {
 }
 
 
+def _normalize_model_id(model_id: str) -> str:
+    """Нормализует model id: снимает расширение файла и квант-суффикс (:Q2_0, _Q6_K)."""
+    normalized = model_id.lower()
+    for ext in [".gguf", ".bin", ".mlx"]:
+        if normalized.endswith(ext):
+            normalized = normalized[: -len(ext)]
+    return re.sub(r"[_:][A-Za-z0-9_]+$", "", normalized)
+
+
 def resolve_model_details(model_id: str, data: ProviderData) -> dict | None:
     """Разрешает детали модели из raw_details через normalized_map.
 
     Один раз для всех syncer'ов — DRY.
     """
+    # Точное совпадение id (важно для моделей с квантом в id, ...:Q2_0)
+    if model_id in data.raw_details:
+        return data.raw_details[model_id]
+
     # Нормализуем ID
-    normalized = model_id.lower()
-    for ext in [".gguf", ".bin", ".mlx"]:
-        if normalized.endswith(ext):
-            normalized = normalized[: -len(ext)]
-    normalized = re.sub(r"[_:][A-Za-z0-9_]+$", "", normalized)
+    normalized = _normalize_model_id(model_id)
 
     # Прямой маппинг
     canonical_key = data.normalized_map.get(normalized)
@@ -970,6 +979,7 @@ def fetch_models(url: str, api_key: str = "") -> ProviderData:
         openai_url = f"{base_url}/models"
 
     model_ids = []
+    data: dict = {}
     try:
         req = urllib.request.Request(openai_url)
         if api_key:
@@ -1001,10 +1011,26 @@ def fetch_models(url: str, api_key: str = "") -> ProviderData:
 
         raw_details, normalized_map, reverse_map = _parse_lmstudio_details(ext_data)
     except Exception as e:
-        logger.info("  [api/v1] нет расширенных данных с %s", extended_url)
+        logger.info("  [api/v1] нет расшиженных данных с %s", extended_url)
     else:
         if raw_details and normalized_map:
             logger.info("  [api/v1] получено %d моделей с расширенными свойствами", len(raw_details))
+
+    # Мета из стандартного /v1/models (vLLM, llama.cpp, Ollama, gateway-прокси):
+    # дополняет контекст/vision там, где extended API молчит или недоступен.
+    v1_details, v1_map = _parse_v1_models_details(data)
+    for model_id, det in v1_details.items():
+        existing = raw_details.get(model_id)
+        if existing is None:
+            raw_details[model_id] = det
+        else:
+            for k, v in det.items():
+                if existing.get(k) is None:
+                    existing[k] = v
+    for norm, model_id in v1_map.items():
+        normalized_map.setdefault(norm, model_id)
+    if v1_details:
+        logger.info("  [v1] получены метаданные для %d моделей из /v1/models", len(v1_details))
 
     return ProviderData(
         model_ids=tuple(model_ids),
@@ -1012,6 +1038,47 @@ def fetch_models(url: str, api_key: str = "") -> ProviderData:
         normalized_map=normalized_map,
         reverse_map=reverse_map,
     )
+
+
+def _parse_v1_models_details(response_data: dict) -> tuple[dict, dict[str, str]]:
+    """Парсит meta из стандартного /v1/models response.
+
+    Поддерживает поля, которые отдают разные OpenAI-совместимые серверы:
+    max_model_len (vLLM), context_length (llama.cpp/gateway),
+    meta.n_ctx_train (LM Studio), vision/input_modalities.
+    """
+    result: dict = {}
+    normalized_map: dict[str, str] = {}
+
+    for m in response_data.get("data", []):
+        model_id = m.get("id")
+        if not model_id:
+            continue
+
+        meta = m.get("meta") or {}
+        caps = m.get("capabilities") or []
+        modalities = m.get("input_modalities") or []
+        rd: dict = {}
+
+        ctx = (m.get("max_model_len") or m.get("context_length")
+               or m.get("max_context_length")
+               or meta.get("n_ctx_train") or meta.get("context_length"))
+        if ctx:
+            try:
+                rd["max_context_length"] = int(ctx)
+            except (TypeError, ValueError):
+                pass
+
+        if m.get("vision") is True or "image" in modalities or "multimodal" in caps:
+            rd["vision"] = True
+        if m.get("tool_use") is True or "tools" in caps or "function_calling" in caps:
+            rd["tools"] = True
+
+        if rd:
+            result[model_id] = rd
+            normalized_map[_normalize_model_id(model_id)] = model_id
+
+    return result, normalized_map
 
 
 def _parse_lmstudio_details(response_data: dict) -> tuple[dict, dict, dict]:
@@ -1083,7 +1150,8 @@ def load_capabilities(path: Path = MODEL_CAPABILITIES_YAML) -> dict[str, dict]:
                 in_models = True
             continue
 
-        model_match = re.match(r"^(\s+)([^:\s][^:]*):\s*$", line)
+        # Ключ модели может содержать двоеточие (например "ISTA/Model:Q2_0:")
+        model_match = re.match(r"^(\s+)([^:\s].*?):\s*$", line)
         if model_match:
             current_model = model_match.group(2).strip()
             capabilities[current_model] = {}

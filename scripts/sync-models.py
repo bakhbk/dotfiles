@@ -82,6 +82,16 @@ CAPABILITIES_DEFAULTS = {
 }
 
 
+def _resolve_context(rd: dict | None, caps: dict, default: int) -> int:
+    """Контекст модели: extended API → /v1 meta → model-capabilities.yaml → дефолт."""
+    if rd and rd.get("max_context_length"):
+        return int(rd["max_context_length"])
+    yaml_ctx = caps.get("max_context_length")
+    if yaml_ctx:
+        return int(yaml_ctx)
+    return default
+
+
 def _is_reasoning_model(model_id: str) -> bool:
     """Определяет, поддерживает ли модель extended thinking по имени."""
     name = model_id.lower()
@@ -148,7 +158,8 @@ def parse_capabilities_yaml(path: Path) -> dict:
                 in_models = True
             continue
 
-        model_match = re.match(r"^(\s+)([^:\s][^:]*):\s*$", line)
+        # Ключ модели может содержать двоеточие ("Model.gguf:Q2_0:")
+        model_match = re.match(r"^(\s+)([^:\s].*?):\s*$", line)
         if model_match:
             current_indent = len(model_match.group(1))
             current_model = model_match.group(2).strip()
@@ -290,13 +301,18 @@ def _parse_v1_models_details(response_data: dict) -> tuple[dict, dict]:
 
         meta = m.get("meta", {})
         caps = m.get("capabilities", [])
+        modalities = m.get("input_modalities") or []
 
         rd: dict = {}
-        if meta:
-            ctx_train = meta.get("n_ctx_train")
-            if ctx_train:
-                rd["max_context_length"] = int(ctx_train)
-        if "multimodal" in caps:
+        ctx = (m.get("max_model_len") or m.get("context_length")
+               or m.get("max_context_length")
+               or meta.get("n_ctx_train") or meta.get("context_length"))
+        if ctx:
+            try:
+                rd["max_context_length"] = int(ctx)
+            except (TypeError, ValueError):
+                pass
+        if "multimodal" in caps or "image" in modalities or m.get("vision") is True:
             rd["vision"] = True
 
         if rd:  # только если есть хотя бы одно поле
@@ -493,11 +509,8 @@ def sync_to_pi(provider_name: str, provider_cfg: dict, model_ids: list[str], cap
 
         existing = next((m for m in provider.get("models", []) if m["id"] == model_id), None)
 
-        # Динамические токены из модели (max_context_length) — дефолты: 128k / 16k
-        if rd and rd.get('max_context_length'):
-            pi_ctx = rd['max_context_length']
-        else:
-            pi_ctx = 128000
+        # Динамические токены из модели (max_context_length), fallback — YAML, дефолты: 128k / 16k
+        pi_ctx = _resolve_context(rd, caps, 128000)
 
         if existing:
             needs_update = False
@@ -704,11 +717,8 @@ def sync_to_opencode(provider_name: str, provider_cfg: dict, model_ids: list[str
                 caps['vision'] = bool(rd['vision'])
             if rd.get('tools') is not None:
                 caps['tools'] = bool(rd['tools'])
-        # Вычисляем max контекст-токены из raw_details для limit
-        if rd and rd.get('max_context_length'):
-            oc_ctx = rd['max_context_length']
-        else:
-            oc_ctx = 128000
+        # Вычисляем max контекст-токены: raw_details → YAML capabilities → дефолт
+        oc_ctx = _resolve_context(rd, caps, 128000)
         modalities = {
             "input": ["image", "text"] if caps.get("vision") else ["text"],
             "output": ["text"],
@@ -819,11 +829,8 @@ def sync_to_zed(provider_name: str, provider_cfg: dict, model_ids: list[str], ca
 
         existing = next((m for m in sub_provider.get("available_models", []) if m.get("name") == model_id), None)
 
-        # Динамические max токены из модели (max_context_length) — дефолт 200000
-        if rd and rd.get('max_context_length'):
-            zed_max_tokens = rd['max_context_length']
-        else:
-            zed_max_tokens = 200000
+        # Динамические max токены: raw_details → YAML capabilities → дефолт 200000
+        zed_max_tokens = _resolve_context(rd, caps, 200000)
 
         if existing:
             needs_update = False
@@ -953,11 +960,8 @@ def sync_to_code(provider_name: str, provider_cfg: dict, model_ids: list[str], c
 
         existing = next((m for m in target.get("models", []) if m.get("id") == model_id), None)
 
-        # Вычисляем динамические max токены из модельных данных (max_context_length)
-        if rd and rd.get('max_context_length'):
-            mcl = rd['max_context_length']
-        else:
-            mcl = 128000
+        # Динамические max токены: raw_details → YAML capabilities → дефолт
+        mcl = _resolve_context(rd, caps, 128000)
 
         if existing:
             needs_update = False

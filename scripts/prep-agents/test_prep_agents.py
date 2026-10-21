@@ -571,6 +571,64 @@ def test_load_capabilities_nonexistent():
     assert caps == {}
 
 
+_CAPS_YAML = """\
+models:
+  ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF:Q2_0:
+    vision: true
+    tools: true
+    web: false
+    max_context_length: 262144
+  qwen3.8-27b-splash:2:
+    vision: false
+    max_context_length: 131072
+"""
+
+
+def test_load_capabilities_colon_keys():
+    """Ключи модели с двоеточием (квант в id) должны парситься, а не теряться."""
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+        f.write(_CAPS_YAML)
+        path = Path(f.name)
+    try:
+        caps = load_capabilities(path)
+        assert "ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF:Q2_0" in caps
+        assert caps["ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF:Q2_0"]["max_context_length"] == 262144
+        assert caps["qwen3.8-27b-splash:2"]["max_context_length"] == 131072
+        assert caps["qwen3.8-27b-splash:2"]["vision"] is False
+    finally:
+        path.unlink()
+
+
+def test_parse_v1_models_details_context():
+    """/v1/models: max_model_len / context_length → max_context_length + vision."""
+    details, norm_map = _parse_v1_models_details({
+        "data": [
+            {"id": "ISTA/Model.gguf:Q2_0", "max_model_len": 262144, "vision": True},
+            {"id": "llama-3.2-3b", "context_length": 8192, "input_modalities": ["text"]},
+        ]
+    })
+    assert details["ISTA/Model.gguf:Q2_0"]["max_context_length"] == 262144
+    assert details["llama-3.2-3b"]["max_context_length"] == 8192
+    assert "vision" not in details["llama-3.2-3b"]
+    assert "ista/model.gguf" in norm_map
+
+
+def test_fetch_models_merges_v1_meta():
+    """Если extended API недоступен, контекст берётся из /v1/models."""
+    payload = json.dumps({"data": [{"id": "M:Q2_0", "max_model_len": 262144}]})
+
+    class _Resp:
+        def read(self): return payload.encode()
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    with patch("urllib.request.urlopen", side_effect=[_Resp(), OSError("no extended api")]):
+        data = fetch_models("http://localhost:1234/v1")
+    assert data.raw_details["M:Q2_0"]["max_context_length"] == 262144
+    assert resolve_model_details("M:Q2_0", data)["max_context_length"] == 262144
+
+
 # ============================================================================
 # Tests: SyncArgs
 # ============================================================================
@@ -640,6 +698,9 @@ def run_tests():
         
         # Utils
         ("utils: load capabilities nonexistent", test_load_capabilities_nonexistent),
+        ("utils: load capabilities colon keys", test_load_capabilities_colon_keys),
+        ("utils: v1 meta context parse", test_parse_v1_models_details_context),
+        ("utils: fetch merges v1 meta", test_fetch_models_merges_v1_meta),
         ("dataclass: sync args defaults", test_sync_args_defaults),
     ]
     
