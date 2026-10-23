@@ -1,0 +1,148 @@
+{
+    "servers": {
+        "duckduckgo-search": {
+            "type": "stdio",
+            "command": "uvx",
+            "args": [
+                "duckduckgo-mcp-server"
+            ]
+        },
+        "filesystem": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@modelcontextprotocol/server-filesystem",
+                ".",
+                "/Users/b/work",
+                "/Users/b/own_projects"
+            ]
+        },
+        "g-search": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "g-search-mcp",
+                "--no-save-state"
+            ]
+        },
+        "fetch": {
+            "type": "stdio",
+            "command": "uvx",
+            "args": [
+                "mcp-server-fetch"
+            ]
+        },
+        "arxiv": {
+            "type": "stdio",
+            "command": "uvx",
+            "args": [
+                "arxiv-mcp-server"
+            ]
+        },
+        "paper-search": {
+            "type": "stdio",
+            "command": "uvx",
+            "args": [
+                "--from",
+                "paper-search-mcp",
+                "--with",
+                "mcp<2",
+                "paper-search-mcp"
+            ]
+        },
+        "ddg-deep": {
+            "type": "stdio",
+            "command": "npx",
+            "args": [
+                "-y",
+                "mcp-duckduckgo"
+            ]
+        },
+        "sequential-thinking": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@modelcontextprotocol/server-sequential-thinking"
+            ]
+        },
+        "sqlite": {
+            "type": "stdio",
+            "command": "uvx",
+            "args": [
+                "--from",
+                "mcp-server-sqlite",
+                "--with",
+                "mcp<2",
+                "mcp-server-sqlite",
+                "--db-path",
+                "/Users/b/own_projects/data.db"
+            ]
+        },
+        "playwright": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@playwright/mcp"
+            ]
+        },
+        "context7": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@upstash/context7-mcp"
+            ]
+        },
+        "markitdown": {
+            "command": "uvx",
+            "args": [
+                "markitdown-mcp"
+            ]
+        },
+        "dart-mcp-server": {
+            "command": "dart",
+            "args": [
+                "mcp-server"
+            ]
+        },
+        "gopls": {
+            "type": "stdio",
+            "command": "gopls",
+            "args": [
+                "mcp"
+            ]
+        },
+        "figma-bridge": {
+            "type": "stdio",
+            "command": "npx",
+            "args": [
+                "-y",
+                "@gethopp/figma-mcp-bridge"
+            ]
+        },
+        "droidmind": {
+            "type": "stdio",
+            "command": "uvx",
+            "args": [
+                "--python",
+                "3.13",
+                "--from",
+                "git+https://github.com/hyperb1iss/droidmind",
+                "--with",
+                "mcp<2",
+                "droidmind",
+                "--transport",
+                "stdio"
+            ]
+        },
+        "memory": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@beledarian/mcp-local-memory"
+            ],
+            "env": {
+                "ARCHIVIST_STRATEGY": "nlp"
+            }
+        }
+    }
+}
