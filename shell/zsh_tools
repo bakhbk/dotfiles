@@ -458,8 +458,6 @@ aigent() {
         return 1
     fi
 
-    unset LLM_BASE_URL LLM_API_KEY LLM_MODEL
-
     local conf="$HOME/.config/dispatch/providers.conf"
     if [ ! -f "$conf" ]; then
         echo "Error: $conf not found"
@@ -473,13 +471,13 @@ aigent() {
         echo "Error: url/key not found in $conf"
         return 1
     fi
-    export LLM_BASE_URL="$url" LLM_API_KEY="$key" LLM_MODEL="$model"
-
-    if [ -n "$custom_system_prompt" ]; then
-        (cd ~/dotfiles/scripts && uv run ./aigent.py -s "$custom_system_prompt" "${task_args[@]}")
-    else
-        (cd ~/dotfiles/scripts && uv run ./aigent.py "${task_args[@]}")
-    fi
+    (export LLM_BASE_URL="$url" LLM_API_KEY="$key" LLM_MODEL="$model"
+     cd ~/dotfiles/scripts || return 1
+     if [ -n "$custom_system_prompt" ]; then
+         uv run ./aigent.py -s "$custom_system_prompt" "${task_args[@]}"
+     else
+         uv run ./aigent.py "${task_args[@]}"
+     fi)
 }
 
 # KR Jarvis AI Agent
@@ -525,13 +523,13 @@ krbot() {
         echo "Error: url/key not found in $conf"
         return 1
     fi
-    export LLM_BASE_URL="$url" LLM_API_KEY="$key" LLM_MODEL="$model"
-
-    if [ -n "$custom_system_prompt" ]; then
-        (cd "$script_dir" && uv run ./aigent.py -s "$custom_system_prompt" "${task_args[@]}")
-    else
-        (cd "$script_dir" && uv run ./aigent.py "${task_args[@]}")
-    fi
+    (export LLM_BASE_URL="$url" LLM_API_KEY="$key" LLM_MODEL="$model"
+     cd "$script_dir" || return 1
+     if [ -n "$custom_system_prompt" ]; then
+         uv run ./aigent.py -s "$custom_system_prompt" "${task_args[@]}"
+     else
+         uv run ./aigent.py "${task_args[@]}"
+     fi)
 }
 
 
