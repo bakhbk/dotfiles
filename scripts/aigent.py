@@ -547,7 +547,8 @@ def _sse_log(raw_line: str, t0: float) -> None:
     _log_q.put(f"[sse +{el:6.2f}s] {s}")
 
 
-def _consume_stream(resp, on_delta=None, on_first_token=None, guard=None):
+def _consume_stream(resp, on_delta=None, on_first_token=None, guard=None,
+                    t0=None):
     """Собирает (content, tool_calls, finish_reason, reasoning, stats) из SSE-чанков.
 
     Пинги релеи не считаются: если STREAM_STALL секунд нет полезных токенов —
@@ -560,7 +561,9 @@ def _consume_stream(resp, on_delta=None, on_first_token=None, guard=None):
     иначе теряет контекст и зацикливается заново. Цифры нормализуются в '#'
     (инкрементирующиеся счётчики не ломают детектор).
 
-    stats: {"ttft": s|None, "tps": tok/s|None, "dur": s,
+    t0 — момент отправки запроса (не получения заголовков): ttft включает очередь.
+
+    stats: {"ttft": s|None, "wait": s, "tps": tok/s|None, "dur": s,
             "n_chunks": int, "usage": dict|None}
     """
     content, reasoning, finish = "", "", None
@@ -569,8 +572,9 @@ def _consume_stream(resp, on_delta=None, on_first_token=None, guard=None):
     t_last = None
     n_chunks = 0
     usage = None
-    last_token = time.monotonic()
-    t0 = last_token
+    t0 = time.monotonic() if t0 is None else t0
+    t_headers = time.monotonic()
+    last_token = t_headers
     with resp:
         for raw in resp.iter_lines():
             if time.monotonic() - last_token > STREAM_STALL:
@@ -653,7 +657,8 @@ def _consume_stream(resp, on_delta=None, on_first_token=None, guard=None):
     tps_usage = None
     if ct_total and gen_dur > 0:
         tps_usage = ct_total / gen_dur
-    stats = {"ttft": ttft, "tps": tps, "tps_usage": tps_usage, "dur": dur,
+    stats = {"ttft": ttft, "wait": t_headers - t0, "tps": tps,
+             "tps_usage": tps_usage, "dur": dur,
              "gen_dur": gen_dur, "n_chunks": n_chunks,
              "ct_total": ct_total, "usage": usage}
     return (content.strip(),
@@ -686,6 +691,7 @@ def call_llm(messages, on_delta=None, guard=None):
             log(f"⚠️ retry {attempt}/{len(RETRY_DELAYS)} in {RETRY_DELAYS[attempt - 1]}s")
             time.sleep(RETRY_DELAYS[attempt - 1])
         resp = None
+        t_req = time.monotonic()
         try:
             with heartbeat("waiting for first token") as hb:
                 resp = requests.post(f"{LLM_BASE_URL}/chat/completions",
@@ -697,7 +703,8 @@ def call_llm(messages, on_delta=None, guard=None):
                 if resp.status_code >= 400:
                     raise LLMError(f"HTTP {resp.status_code}: {resp.text[:300]}")
                 return _consume_stream(resp, on_delta=on_delta,
-                                       on_first_token=hb.stop, guard=guard)
+                                       on_first_token=hb.stop, guard=guard,
+                                       t0=t_req)
         except LLMError as e:
             last_err = str(e)
             if not e.retryable:
@@ -1151,6 +1158,8 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
             tps_usage = stats.get("tps_usage")
             dur = stats.get("dur") or 0.0
             ttft_s = f"{ttft:.2f}s" if ttft is not None else "-"
+            wait = stats.get("wait") or 0.0
+            wait_s = f" wait={wait:.2f}s" if wait >= 1 else ""
             tps_s = f"{tps:.1f}" if tps is not None else "-"
             tps_usage_s = f"/{tps_usage:.1f}u" if tps_usage is not None else ""
             usage_note = ""
@@ -1160,7 +1169,7 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                 ct = u.get("completion_tokens")
                 if pt is not None and ct is not None:
                     usage_note = f" usage={pt}+{ct}"
-            status(f"turn {turn}: ttft={ttft_s} tps={tps_s}{tps_usage_s} "
+            status(f"turn {turn}: ttft={ttft_s}{wait_s} tps={tps_s}{tps_usage_s} "
                    f"finish={finish_reason} content={len(content)}c "
                    f"reasoning={len(reasoning)}c tools={len(tool_calls)} "
                    f"dur={dur:.2f}s{usage_note}")
@@ -1182,6 +1191,9 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                         parts.append(f"avg tps={sum(tpss) / len(tpss):.1f}")
                     if tpsu:
                         parts.append(f"avg tps_usage={sum(tpsu) / len(tpsu):.1f}")
+                    waits = [s.get("wait") or 0.0 for s in turns_stats]
+                    if max(waits) >= 1:
+                        parts.append(f"queue={max(waits):.2f}s")
                     parts.append(f"total dur={total_dur:.2f}s")
                     last_usage = turns_stats[-1].get("usage") if turns_stats else None
                     if last_usage:

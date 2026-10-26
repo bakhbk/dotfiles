@@ -262,3 +262,18 @@ def test_base_url_wins(tmp_path, monkeypatch):
     monkeypatch.setenv("LLM_BASE_URL", "http://localhost:18085/v1")
     url, key = aigent._resolve_llm_config("Jarvis", True, "http://127.0.0.1:1234/v1")
     assert (url, key) == ("http://127.0.0.1:1234/v1", "sk-j")
+
+
+def test_ttft_includes_queue_wait():
+    import time
+    resp = _stream("hello world", chunk=5)
+    t0 = time.monotonic() - 5.0
+    *_, stats = aigent._consume_stream(resp, t0=t0)
+    assert stats["ttft"] >= 5.0, f"очередь не учтена: ttft={stats['ttft']}"
+    assert stats["dur"] >= 5.0 and stats["wait"] >= 0.0
+    assert stats["gen_dur"] < stats["ttft"]
+
+
+def test_ttft_without_t0():
+    *_, stats = aigent._consume_stream(_stream("hello world", chunk=5))
+    assert stats["ttft"] is not None and stats["wait"] >= 0.0
