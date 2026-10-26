@@ -91,7 +91,8 @@ LLM_MODEL = os.getenv("LLM_MODEL", "qwen")
 LLM_THINKING = os.getenv("LLM_THINKING", "on")  # on (default) | off — режим рассуждений
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "local")  # человекочитаемое имя бэкенда для 📄/🔗 строк
 LLM_HEADERS = {"Content-Type": "application/json",
-               "Authorization": f"Bearer {LLM_API_KEY}"}
+               "Authorization": f"Bearer {LLM_API_KEY}",
+               "Connection": "close"}
 
 MAX_TURNS = int(os.getenv("AIGENT_MAX_TURNS", "1000"))
 MAX_CONTINUES = 3                # сколько раз «дописывать» ответ при finish=length

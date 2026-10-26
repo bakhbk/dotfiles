@@ -373,3 +373,24 @@ def test_status_keeps_last_live_line(capsys):
     out = capsys.readouterr().out
     assert out == "\r\rturn 7: dur=3.4s\n✅ done in 7 turns\n"
     assert aigent._live_len[0] == 0
+
+
+def test_llm_stream_requests_close_connection(monkeypatch):
+    captured = {}
+
+    class OkResp(FakeResp):
+        status_code = 200
+
+        def close(self):
+            pass
+
+    def fake_post(url, **kw):
+        captured["headers"] = kw.get("headers") or {}
+        return OkResp(["data: [DONE]"])
+
+    monkeypatch.setattr(aigent.requests, "post", fake_post)
+    aigent.call_llm([{"role": "user", "content": "hi"}])
+    assert captured["headers"].get("Connection") == "close", (
+        "SSE keep-alive leaves the proxy waiting for EOF: it logs the "
+        "completed answer as 499 (client hangup)"
+    )
