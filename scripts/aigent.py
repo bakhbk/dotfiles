@@ -16,8 +16,7 @@
 - Всё действие асинхронно пишется в $AIGENT_DIR/<ts>-<id>.log (по умолчанию
   ~/.local/state/aigent), путь печатается в stdout на старте.
 - Ошибки API: retry x3 (паузы 3/5/10s) на network/429/5xx, 4xx — сразу ошибка.
-- Loop-защита включена по умолчанию. Отключение: --no-loop-guard
-  или AIGENT_LOOP_GUARD=off.
+- Loop-защита выключена по умолчанию. Включение: AIGENT_LOOP_GUARD=on.
 - Compact контекста (beta, default = COMPACT_DEFAULT): AIGENT_COMPACT=off / --no-compact для отключения.
   Средние tool-группы → structured summary с ref, оригиналы в
   <AIGENT_DIR>/details/, возврат по tool get_details(ref), TTL.
@@ -105,7 +104,7 @@ LOOP_WINDOW = int(os.getenv("AIGENT_LOOP_WINDOW", "2000"))    # хвост бу�
 LOOP_PROBE = int(os.getenv("AIGENT_LOOP_PROBE", "100"))       # probe = последние N символов буфера
 LOOP_REPEAT = int(os.getenv("AIGENT_LOOP_REPEAT", "2"))       # порог вхождений probe в окне → стоп
 LOOP_NORM = re.compile(r"\d+")                                 # инкремент-счётчики → '#'
-LOOP_GUARD_ENABLED = os.getenv("AIGENT_LOOP_GUARD", "on").lower() != "off"  # глобальный выключатель
+LOOP_GUARD_ENABLED = os.getenv("AIGENT_LOOP_GUARD", "off").lower() != "off"  # глобальный выключатель
 TOOL_REPEAT_LIMIT = int(os.getenv("AIGENT_TOOL_REPEAT_LIMIT", "3"))  # одинаковых tool_call подряд → stuck
 WATCHDOG_REPEAT_LIMIT = int(os.getenv("AIGENT_WATCHDOG_REPEAT_LIMIT", "3"))  # одинаковых сигнатур подряд → stuck
 LLM_TIMEOUT = (10, 300)          # (connect, read)
