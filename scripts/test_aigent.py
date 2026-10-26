@@ -8,6 +8,7 @@
 4. Короткий текст (< LOOP_WINDOW) → молчит.
 """
 import json
+import os
 
 import aigent
 
@@ -321,3 +322,54 @@ def test_summary_counts_tool_calls():
     assert "tools=2" in s
     assert "total dur=3.00s" in s
     assert "done in 2 turns" in s
+
+
+def test_live_overwrites_previous_line(capsys):
+    aigent._live_len[0] = 0
+    aigent.live("turn 1: dur=1.2s")
+    aigent.live("turn 2: dur=2.7s")
+    out = capsys.readouterr().out
+    assert out == "\r\rturn 1: dur=1.2s\r" + " " * 16 + "\rturn 2: dur=2.7s"
+    assert aigent._live_len[0] == 16
+
+
+def test_live_is_silent_when_quiet(capsys):
+    aigent.QUIET, saved = True, aigent.QUIET
+    try:
+        aigent._live_len[0] = 0
+        aigent.live("turn 1")
+        assert capsys.readouterr().out == ""
+        assert aigent._live_len[0] == 0
+    finally:
+        aigent.QUIET = saved
+
+
+def test_live_truncates_to_terminal_width(capsys):
+    saved = aigent.shutil.get_terminal_size
+    aigent.shutil.get_terminal_size = lambda: os.terminal_size((80, 24))
+    try:
+        aigent._live_len[0] = 0
+        aigent.live("x" * 500)
+        out = capsys.readouterr().out
+        assert len(out) == 1 + 79 + 1
+        assert aigent._live_len[0] == 79
+    finally:
+        aigent.shutil.get_terminal_size = saved
+
+
+def test_clear_live_resets_state(capsys):
+    aigent._live_len[0] = 5
+    aigent.clear_live()
+    assert capsys.readouterr().out == "\r" + " " * 5 + "\r"
+    assert aigent._live_len[0] == 0
+    aigent.clear_live()
+    assert capsys.readouterr().out == ""
+
+
+def test_status_keeps_last_live_line(capsys):
+    aigent._live_len[0] = 0
+    aigent.live("turn 7: dur=3.4s")
+    aigent.status("✅ done in 7 turns")
+    out = capsys.readouterr().out
+    assert out == "\r\rturn 7: dur=3.4s\n✅ done in 7 turns\n"
+    assert aigent._live_len[0] == 0

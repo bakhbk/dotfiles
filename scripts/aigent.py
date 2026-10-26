@@ -8,8 +8,9 @@
 """LLM coding agent.
 
 - stdout без -v: строки запуска (📄 log-файл, 🔗 provider/url/model) +
+  одна live-строка (turn N / heartbeat, перезаписывает себя) +
   финальный ответ + завершающие статусы (✅ done, 💾 saved, ⚠️/💥 ошибки).
-  Промежуточный шум (turn, tool-линии) — только в лог-файл.
+  Полная история turn/tool-линий — только в лог-файл.
 - -v: полный вывод (log-путь, endpoint, turn-строки, текст модели, аргументы,
   preview результатов, heartbeat-строки).
 - Всё действие асинхронно пишется в $AIGENT_DIR/<ts>-<id>.log (по умолчанию
@@ -34,6 +35,7 @@ import json
 import os
 import queue
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -470,8 +472,31 @@ def status(msg: str) -> None:
     Ошибки (💥 ❌ ⛔ ⚠️) печатаются даже при --quiet."""
     is_error = msg.startswith(("💥", "❌", "⛔", "⚠️"))
     if not QUIET or is_error:
+        if _live_len[0]:
+            print()  # последняя live-строка остаётся на экране
+            _live_len[0] = 0
         print(msg, flush=True)
     _log_q.put(msg)
+
+
+_live_len = [0]
+
+
+def live(msg: str) -> None:
+    """Одна live-строка прогресса: перезаписывает предыдущую через \\r.
+    Обрезается по ширину терминала — иначе wrap ломает перезапись."""
+    if QUIET:
+        return
+    width = shutil.get_terminal_size().columns - 1
+    msg = msg[:width]
+    print("\r" + " " * _live_len[0] + "\r" + msg, end="", flush=True)
+    _live_len[0] = len(msg)
+
+
+def clear_live() -> None:
+    if _live_len[0]:
+        print("\r" + " " * _live_len[0] + "\r", end="", flush=True)
+        _live_len[0] = 0
 
 
 class _HeartbeatHandle:
@@ -482,17 +507,16 @@ class _HeartbeatHandle:
         self._fired = fired_ref
 
     def stop(self) -> None:
-        if VERBOSE and self._fired[0]:
-            print("\r" + " " * 72 + "\r", end="", flush=True)
+        if self._fired[0]:
+            clear_live()
             self._fired[0] = False
         self._stop.set()
 
 
 @contextmanager
 def heartbeat(label: str, interval: int = 10):
-    """Пока долгая операция (LLM/bash) идёт: строка в файл каждые N секунд,
-    при -v — live-строка в stdout через \\r. Поток просыпается раз в секунду,
-    чтобы не задерживать завершение операции.
+    """Пока долгая операция (LLM/bash) идёт: live-строка обновляется каждую
+    секунду, в файл пишется каждые N секунд.
 
     Yield: _HeartbeatHandle — можно позвать .stop() досрочно."""
     stop = threading.Event()
@@ -503,13 +527,12 @@ def heartbeat(label: str, interval: int = 10):
         last = 0
         while not stop.wait(1):
             el = int(time.monotonic() - t0)
+            line = f"⏳ {label} — {el}s"
+            fired[0] = True
+            live(line)
             if el - last >= interval:
                 last = el
-                line = f"⏳ {label} — {el}s"
                 _log_q.put(line)
-                if VERBOSE:
-                    fired[0] = True
-                    print(f"\r{line}", end="", flush=True)
 
     th = threading.Thread(target=tick, daemon=True)
     th.start()
@@ -518,8 +541,6 @@ def heartbeat(label: str, interval: int = 10):
     finally:
         stop.set()
         th.join(timeout=5)
-        if VERBOSE and fired[0]:
-            print("\r" + " " * 72 + "\r", end="", flush=True)
 
 
 # --------------------------------------------------------------------------
@@ -1203,16 +1224,24 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                 ct = u.get("completion_tokens")
                 if pt is not None and ct is not None:
                     usage_note = f" usage={pt}+{ct}"
-            status(f"turn {turn}: {_timing_line(stats)} tps={tps_s}{tps_usage_s} "
-                   f"finish={finish_reason} content={len(content)}c "
-                   f"reasoning={len(reasoning)}c tools={len(tool_calls)}{usage_note}")
+            turn_line = (f"turn {turn}: {_timing_line(stats)} tps={tps_s}{tps_usage_s} "
+                         f"finish={finish_reason} content={len(content)}c "
+                         f"reasoning={len(reasoning)}c tools={len(tool_calls)}{usage_note}")
+            if VERBOSE:
+                status(turn_line)
+            else:
+                log(turn_line)
+                live(turn_line)
             if content:
                 last_content = content
 
             if not tool_calls:  # финальный ответ
                 if content:
                     if not VERBOSE:
-                        print(f"\n{content}")
+                        if _live_len[0]:
+                            print()
+                            _live_len[0] = 0
+                        print(content)
                     print(flush=True)
                     status(_summary(turns_stats))
                     save_result(last_content, "no output" if not last_content else "")
