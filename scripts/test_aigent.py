@@ -312,3 +312,12 @@ def test_timing_line_shows_real_wait_phase():
 
 def test_timing_line_without_first_token():
     assert "ttft=-" in aigent._timing_line({"wait": 5.0, "dur": 5.0})
+
+
+def test_summary_counts_tool_calls():
+    turns_stats = [{"ttft": 1.0, "dur": 2.0, "tools": 2},
+                   {"ttft": 0.5, "dur": 1.0, "tools": 0}]
+    s = aigent._summary(turns_stats)
+    assert "tools=2" in s
+    assert "total dur=3.00s" in s
+    assert "done in 2 turns" in s
