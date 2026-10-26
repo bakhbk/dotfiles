@@ -225,3 +225,40 @@ def test_empty_answer_exit_3(monkeypatch):
     monkeypatch.setattr(aigent, "save_result", lambda *a, **k: None)
     rc = aigent.agent_loop("test")
     assert rc == 3, f"ожидался exit 3, получен {rc}, вызовов call_llm={calls['n']}"
+
+
+CONF = "[Jarvis]\nurl=https://jarvis.example/v1\nkey=sk-j\n\n[kr-jarvis]\nurl=http://localhost:18085/v1\nkey=sk-k\n"
+
+
+def _conf(tmp_path, monkeypatch):
+    path = tmp_path / "providers.conf"
+    path.write_text(CONF, encoding="utf-8")
+    monkeypatch.setattr(aigent, "PROVIDERS_CONF", str(path))
+    return path
+
+
+def test_provider_lookup_ignores_case(tmp_path, monkeypatch):
+    _conf(tmp_path, monkeypatch)
+    assert aigent._load_provider_conf("jarvis") == ("https://jarvis.example/v1", "sk-j")
+    assert aigent._load_provider_conf("nope") == (None, None)
+
+
+def test_explicit_provider_beats_env(tmp_path, monkeypatch):
+    _conf(tmp_path, monkeypatch)
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:18085/v1")
+    monkeypatch.setenv("LLM_API_KEY", "sk-k")
+    assert aigent._resolve_llm_config("Jarvis", True) == ("https://jarvis.example/v1", "sk-j")
+
+
+def test_env_kept_when_provider_implicit(tmp_path, monkeypatch):
+    _conf(tmp_path, monkeypatch)
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:18085/v1")
+    monkeypatch.setenv("LLM_API_KEY", "sk-k")
+    assert aigent._resolve_llm_config("local", False) == ("http://localhost:18085/v1", "sk-k")
+
+
+def test_base_url_wins(tmp_path, monkeypatch):
+    _conf(tmp_path, monkeypatch)
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:18085/v1")
+    url, key = aigent._resolve_llm_config("Jarvis", True, "http://127.0.0.1:1234/v1")
+    assert (url, key) == ("http://127.0.0.1:1234/v1", "sk-j")

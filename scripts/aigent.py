@@ -67,14 +67,23 @@ def _load_provider_conf(provider):
             return None, None
     except (OSError, configparser.Error):
         return None, None
-    if provider not in cp:
+    name = next((s for s in cp.sections() if s.lower() == provider.lower()), None)
+    if name is None:
         return None, None
-    sec = cp[provider]
+    sec = cp[name]
     url = sec.get("url") or None
     key = sec.get("key") or None
     if key:
         key = key.strip().strip('"').strip("'")
     return url, key
+
+
+def _resolve_llm_config(provider, explicit, base_url=None):
+    """Return (url, key): --base-url > conf[provider] > env LLM_* > defaults."""
+    url, key = _load_provider_conf(provider)
+    if not explicit:
+        url, key = os.environ.get("LLM_BASE_URL") or url, os.environ.get("LLM_API_KEY") or key
+    return base_url or url or LLM_BASE_URL, key or LLM_API_KEY
 
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen")
 LLM_THINKING = os.getenv("LLM_THINKING", "on")  # on (default) | off — режим рассуждений
@@ -1307,8 +1316,6 @@ def main() -> int:
         LLM_PROVIDER = args.provider
     if args.model:
         LLM_MODEL = args.model
-    if args.base_url:
-        LLM_BASE_URL = args.base_url
     if args.max_turns:
         MAX_TURNS = args.max_turns
     if args.max_tokens:
@@ -1342,14 +1349,9 @@ def main() -> int:
     NO_USAGE = args.no_usage
     NO_TOOLS = args.no_tools
 
-    # Порядок приоритетов: env-переменные > секция [provider] в dispatch.conf > дефолты
-    if not os.environ.get("LLM_BASE_URL") or not os.environ.get("LLM_API_KEY"):
-        url, key = _load_provider_conf(LLM_PROVIDER)
-        if not os.environ.get("LLM_BASE_URL") and url:
-            LLM_BASE_URL = url
-        if not os.environ.get("LLM_API_KEY") and key:
-            LLM_API_KEY = key
-        LLM_HEADERS["Authorization"] = f"Bearer {LLM_API_KEY}"
+    # Порядок приоритетов: --base-url > секция [provider] в dispatch.conf > env > дефолты
+    LLM_BASE_URL, LLM_API_KEY = _resolve_llm_config(LLM_PROVIDER, args.provider, args.base_url)
+    LLM_HEADERS["Authorization"] = f"Bearer {LLM_API_KEY}"
 
     system_prompt = args.system_prompt
     if args.system_prompt_file:
