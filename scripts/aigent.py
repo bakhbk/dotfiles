@@ -668,6 +668,18 @@ def _consume_stream(resp, on_delta=None, on_first_token=None, guard=None,
             stats)
 
 
+def _timing_line(stats) -> str:
+    """ttft / gen / dur. Ожидание заголовков показано только если оно реально фаза."""
+    ttft = stats.get("ttft")
+    wait = stats.get("wait") or 0.0
+    parts = [f"ttft={ttft:.2f}s" if ttft is not None else "ttft=-"]
+    if ttft is not None and ttft - wait >= 1:
+        parts.append(f"wait={wait:.2f}s")
+    parts.append(f"gen={stats.get('gen_dur') or 0.0:.2f}s")
+    parts.append(f"dur={stats.get('dur') or 0.0:.2f}s")
+    return " ".join(parts)
+
+
 def call_llm(messages, on_delta=None, guard=None):
     """POST /chat/completions (stream). Возвращает (content, tool_calls, finish_reason, reasoning).
 
@@ -1153,13 +1165,8 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                 if finish_reason in ("length", "loop"):
                     log(f"⚠️ answer may be incomplete (still {finish_reason} after continuations)")
             turns_stats.append(stats)
-            ttft = stats.get("ttft")
             tps = stats.get("tps")
             tps_usage = stats.get("tps_usage")
-            dur = stats.get("dur") or 0.0
-            ttft_s = f"{ttft:.2f}s" if ttft is not None else "-"
-            wait = stats.get("wait") or 0.0
-            wait_s = f" wait={wait:.2f}s" if wait >= 1 else ""
             tps_s = f"{tps:.1f}" if tps is not None else "-"
             tps_usage_s = f"/{tps_usage:.1f}u" if tps_usage is not None else ""
             usage_note = ""
@@ -1169,10 +1176,9 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                 ct = u.get("completion_tokens")
                 if pt is not None and ct is not None:
                     usage_note = f" usage={pt}+{ct}"
-            status(f"turn {turn}: ttft={ttft_s}{wait_s} tps={tps_s}{tps_usage_s} "
+            status(f"turn {turn}: {_timing_line(stats)} tps={tps_s}{tps_usage_s} "
                    f"finish={finish_reason} content={len(content)}c "
-                   f"reasoning={len(reasoning)}c tools={len(tool_calls)} "
-                   f"dur={dur:.2f}s{usage_note}")
+                   f"reasoning={len(reasoning)}c tools={len(tool_calls)}{usage_note}")
             if content:
                 last_content = content
 
@@ -1191,9 +1197,6 @@ def agent_loop(user_message: str, system_prompt: str = SYSTEM_PROMPT) -> int:
                         parts.append(f"avg tps={sum(tpss) / len(tpss):.1f}")
                     if tpsu:
                         parts.append(f"avg tps_usage={sum(tpsu) / len(tpsu):.1f}")
-                    waits = [s.get("wait") or 0.0 for s in turns_stats]
-                    if max(waits) >= 1:
-                        parts.append(f"queue={max(waits):.2f}s")
                     parts.append(f"total dur={total_dur:.2f}s")
                     last_usage = turns_stats[-1].get("usage") if turns_stats else None
                     if last_usage:

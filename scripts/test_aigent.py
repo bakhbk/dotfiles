@@ -298,3 +298,17 @@ def test_call_llm_measures_queue_wait(monkeypatch):
     *_, stats = aigent.call_llm([{"role": "user", "content": "hi"}])
     assert stats["wait"] >= 0.3, f"очередь потеряна: wait={stats['wait']}"
     assert stats["ttft"] is None, f"пустой стрим не должен давать ttft: {stats['ttft']}"
+
+
+def test_timing_line_hides_duplicate_wait():
+    stats = {"ttft": 198.5, "wait": 198.5, "gen_dur": 1.98, "dur": 200.48}
+    assert aigent._timing_line(stats) == "ttft=198.50s gen=1.98s dur=200.48s"
+
+
+def test_timing_line_shows_real_wait_phase():
+    stats = {"ttft": 30.0, "wait": 0.2, "gen_dur": 29.8, "dur": 30.0}
+    assert aigent._timing_line(stats) == "ttft=30.00s wait=0.20s gen=29.80s dur=30.00s"
+
+
+def test_timing_line_without_first_token():
+    assert "ttft=-" in aigent._timing_line({"wait": 5.0, "dur": 5.0})
