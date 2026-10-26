@@ -277,3 +277,24 @@ def test_ttft_includes_queue_wait():
 def test_ttft_without_t0():
     *_, stats = aigent._consume_stream(_stream("hello world", chunk=5))
     assert stats["ttft"] is not None and stats["wait"] >= 0.0
+
+
+def test_call_llm_measures_queue_wait(monkeypatch):
+    """Regression: ttft/wait считаются от отправки POST, а не от заголовков."""
+    import time
+
+    class QueuedResp(FakeResp):
+        status_code = 200
+
+        def __init__(self, lines, delay):
+            super().__init__(lines)
+            time.sleep(delay)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(aigent.requests, "post",
+                        lambda url, **kw: QueuedResp(["data: [DONE]"], 0.3))
+    *_, stats = aigent.call_llm([{"role": "user", "content": "hi"}])
+    assert stats["wait"] >= 0.3, f"очередь потеряна: wait={stats['wait']}"
+    assert stats["ttft"] is None, f"пустой стрим не должен давать ttft: {stats['ttft']}"
