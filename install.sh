@@ -37,7 +37,6 @@ CONFIGS=(
   tmux/create_tmux_session.sh
   utils/commit.sh
   utils/fvm_tools.sh
-  ollama/ollama_fzf.sh
   utils/clean.sh
 )
 
@@ -57,9 +56,13 @@ if [ $# -eq 0 ]; then
       cp -rvf "${i}" ~/
     fi
   done
+  mkdir -p ~/.dotfiles
   for i in "${CONFIGS[@]}"; do
-    mkdir -p ~/.dotfiles
-    cp -rvf "${i}" ~/.dotfiles/
+    if [ -f "$i" ]; then
+      cp -rvf "${i}" ~/.dotfiles/
+    else
+      echo "skip: ${i} (not found in dotfiles)" >&2
+    fi
   done
 
 fi
