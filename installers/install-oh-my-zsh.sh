@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Install fresh oh-my-zsh and add to current zshrc
-git clone https://github.com/ohmyzsh/ohmyzsh.git ~/.oh-my-zsh
+[ -d ~/.oh-my-zsh ] || git clone https://github.com/ohmyzsh/ohmyzsh.git ~/.oh-my-zsh
 cd ~/.oh-my-zsh && git pull && cd -
 touch ~/.new_zshrc
 echo "export USE_OH_MY_ZSH='true'" >>~/.new_zshrc
@@ -10,9 +10,10 @@ echo "$(cat ~/.dotfiles/.zshrc)" >>~/.new_zshrc
 cp ~/.new_zshrc ~/.zshrc
 rm -rf ~/.new_zshrc
 
-git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
-git clone https://github.com/MichaelAquilina/zsh-you-should-use.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/you-should-use
-git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
+for repo in zsh-users/zsh-autosuggestions MichaelAquilina/zsh-you-should-use zsh-users/zsh-syntax-highlighting; do
+  name=$(basename "$repo")
+  [ -d "${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/$name" ] || git clone "https://github.com/$repo" "${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/$name"
+done
 
 # Custom themes: копируем из dotfiles (источник: shell/themes/)
 mkdir -p ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/themes
