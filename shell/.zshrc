@@ -54,6 +54,7 @@ source ~/.dotfiles/create_tmux_session.sh
 source ~/.dotfiles/commit.sh
 source ~/.dotfiles/fvm_tools.sh
 source ~/.dotfiles/clean.sh
+source ~/.dotfiles/charset_fix.sh
 source ~/.dotfiles/project_clean.sh
 if [ -f ~/work/.zshrc ]; then
   source ~/work/.zshrc

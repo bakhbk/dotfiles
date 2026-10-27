@@ -38,6 +38,7 @@ CONFIGS=(
   utils/commit.sh
   utils/fvm_tools.sh
   utils/clean.sh
+  shell/charset_fix.sh
 )
 
 # Configs that should be copied to the home directory.
