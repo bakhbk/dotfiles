@@ -12,12 +12,13 @@ rm -rf ~/.new_zshrc
 
 for repo in zsh-users/zsh-autosuggestions MichaelAquilina/zsh-you-should-use zsh-users/zsh-syntax-highlighting; do
   name=$(basename "$repo")
-  [ -d "${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/$name" ] || git clone "https://github.com/$repo" "${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/$name"
+  custom="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins"
+  [ -d "$custom/$name" ] || git clone "https://github.com/$repo" "$custom/$name"
 done
 
 # Custom themes: копируем из dotfiles (источник: shell/themes/)
-mkdir -p ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/themes
-cp -f "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"/shell/themes/*.zsh-theme ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/themes/
+mkdir -p "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes"
+cp -f "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"/shell/themes/*.zsh-theme "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/"
 
 # Install zsh if it is not present
 if ! command -v zsh >/dev/null 2>&1; then
