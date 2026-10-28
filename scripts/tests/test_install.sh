@@ -60,6 +60,9 @@ check "--ask shows the question" "grep -q 'Запустить ./scripts/bootstra
 
 # 7. configs are copied regardless of arguments
 check "zsh_aliases copied" "grep -q 'alias prep-fast' $H2/.dotfiles/zsh_aliases"
+check "prep has python3 fallback (zsh)" "grep -q 'python3' $H2/.dotfiles/zsh_aliases"
+check "prep has python3 fallback (wrapper)" "grep -q 'python3' $H2/.local/bin/prep"
+check "doctor.sh is executable" "[ -x $REPO/installers/doctor.sh ]"
 
 echo
 echo "Passed: $PASS, Failed: $FAIL"

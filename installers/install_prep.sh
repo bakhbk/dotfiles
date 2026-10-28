@@ -27,7 +27,7 @@ mkdir -p "$HOME/.dotfiles"
 } > "$HOME/.dotfiles/dotfiles.env"
 
 # 2. uv
-"$REPO_DIR/installers/install_uv.sh" || true
+"$REPO_DIR/installers/install_uv.sh" || echo "⚠️  uv не установлен — prep будет использовать python3"
 
 # 3. Wrapper in ~/.local/bin (already on PATH in .zshrc)
 mkdir -p "$HOME/.local/bin"
@@ -36,16 +36,21 @@ mkdir -p "$HOME/.local/bin"
 #!/usr/bin/env bash
 # prep — синхронизация моделей AI-агентов из dotfiles
 DOTFILES_DIR="${DOTFILES_DIR:-$HOME/dotfiles}"
+export PATH="$HOME/.local/bin:$PATH"   # uv/prep могут жить только там
 SCRIPT="$DOTFILES_DIR/scripts/prep-agents/prep-agents.py"
 if [[ ! -f "$SCRIPT" ]]; then
   echo "❌ prep: не найден $SCRIPT (dotfiles не установлен в ~/dotfiles)" >&2
   exit 1
 fi
-if ! command -v uv >/dev/null 2>&1; then
-  echo "❌ prep: не найден uv. Выполните: ~/dotfiles/installers/install_uv.sh" >&2
+if command -v uv >/dev/null 2>&1; then
+  exec uv run "$SCRIPT" "$@"
+elif command -v python3 >/dev/null 2>&1; then
+  echo "⚠️  uv не найден — запускаю через python3" >&2
+  exec python3 "$SCRIPT" "$@"
+else
+  echo "❌ prep: нужны uv или python3. Установите uv: ~/dotfiles/installers/install_uv.sh" >&2
   exit 1
 fi
-exec uv run "$SCRIPT" "$@"
 EOF
 } > "$HOME/.local/bin/prep"
 chmod +x "$HOME/.local/bin/prep"

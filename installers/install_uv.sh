@@ -14,9 +14,18 @@ fi
 
 echo "📦 Устанавливаем uv..."
 
-# 1. Homebrew (macOS / Linuxbrew)
+echo "📦 Устанавливаем uv..."
+
+# 1. Homebrew (macOS / Linuxbrew). Brew can be locked by a parallel install
+#    (rust/llvm/...), so a failure here must NOT abort the script.
 if command -v brew >/dev/null 2>&1; then
-  brew install uv
+  for attempt in 1 2 3; do
+    if brew install uv; then
+      break
+    fi
+    echo "⚠️  brew install uv не прошёл (попытка $attempt) — жем 5 c..."
+    sleep 5
+  done
 fi
 
 # 2. Official installer (installs into ~/.local/bin)
@@ -29,12 +38,14 @@ if ! command -v uv >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
   python3 -m pip install --user uv
 fi
 
+# Make sure ~/.local/bin is reachable in this and future sessions
+if [[ -d "$HOME/.local/bin" ]] && ! command -v uv >/dev/null 2>&1; then
+  export PATH="$HOME/.local/bin:$PATH"
+fi
+
 if ! command -v uv >/dev/null 2>&1; then
-  echo "❌ uv не удалось установить. Установите вручную: curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+  echo "⚠️  uv не установлен — prep будет работать через python3 (fallback)" >&2
   exit 1
 fi
 
-# Make sure ~/.local/bin is on PATH for the current session and future shells
-mkdir -p "$HOME/.local/bin"
-export PATH="$HOME/.local/bin:$PATH"
 echo "✅ uv установлен: $(command -v uv)"

@@ -48,6 +48,17 @@ prep-clean          # --cleanup
 а путь к репозиторию берётся из `~/.dotfiles/dotfiles.env` (генерируется
 `installers/install_prep.sh`). Подробнее — `scripts/prep-agents/README.md`.
 
+Если `prep` не работает, диагностика одной командой:
+
+```bash
+$ ./installers/doctor.sh     # проверит uv, PATH, prep-agents.py, providers.conf
+```
+
+`install_uv.sh` устойчив к lock'ам Homebrew ("A `brew install uv` process has already
+locked /usr/local/Cellar/uv"): он повторяет попытку 3 раза, затем ставит uv через
+официальный installer (в `~/.local/bin`), затем через `pip`. Сам `prep` при
+отсутствии `uv` падает не с ошибкой, а запускается на `python3`.
+
 ```bash
 # Только uv/prep, без остального, без остального
 $ ./installers/install_uv.sh

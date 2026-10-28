@@ -261,15 +261,22 @@ fi
 : "${DOTFILES_DIR:=$HOME/dotfiles}"
 
 prep() {
-    if ! command -v uv &> /dev/null; then
-        echo "❌ prep: не найден uv. Выполните: $DOTFILES_DIR/installers/install_uv.sh" >&2
+    local script="$DOTFILES_DIR/scripts/prep-agents/prep-agents.py"
+    if [[ ! -f "$script" ]]; then
+        echo "❌ prep: не найден $script (git pull + ./install.sh)" >&2
         return 1
     fi
-    if [[ ! -f "$DOTFILES_DIR/scripts/prep-agents/prep-agents.py" ]]; then
-        echo "❌ prep: не найден $DOTFILES_DIR/scripts/prep-agents/prep-agents.py (git pull + ./install.sh)" >&2
+    # NB: `command -v` can match an alias (oh-my-zsh sets uv='noglob uv'),
+    # so check the real binary with `whence -p`.
+    if whence -p uv &> /dev/null; then
+        uv run "$script" "$@"
+    elif command -v python3 &> /dev/null; then
+        echo "⚠️  uv не найден — запускаю через python3 (установите: $DOTFILES_DIR/installers/install_uv.sh)" >&2
+        python3 "$script" "$@"
+    else
+        echo "❌ prep: нужны uv или python3" >&2
         return 1
     fi
-    uv run "$DOTFILES_DIR/scripts/prep-agents/prep-agents.py" "$@"
 }
 alias prep-fast='prep --max-context 8000'
 alias prep-code='prep --max-context 16000'
