@@ -5,18 +5,17 @@ Configuration files and useful scripts for OS X and Linux.
 ## Installation
 
 ```bash
-$ ./install.sh                # спросит один раз, дальше выбор запоминается
+$ ./install.sh                # каждый раз спрашивает (подсказывает прошлый выбор)
 $ ./install.sh -y             # bootstrap + всё без вопросов
 $ ./install.sh --no-bootstrap # только конфиги shell'а
-$ ./install.sh --ask          # спросить снова
 ```
 
 Конфиги копируются в `~/.dotfiles`, а `.zshrc`/`.bashrc`/`.tmux.conf` — в `~/`.
 Это происходит **независимо от аргументов** скрипта.
 
-### Один «да» — и больше ни один скрипт не спрашивает
+### Один «да» — и больше ни один вложенный скрипт не спрашивает
 
-После подтверждения `install.sh` экспортирует:
+Во время работы `install.sh` экспортирует для всех вложенных install'er'ов:
 
 | Переменная | Эффект |
 |---|---|
@@ -25,10 +24,11 @@ $ ./install.sh --ask          # спросить снова
 | `HOMEBREW_NO_INSTALL_CLEANUP=1` | без лишней уборки Cellar |
 | `DEBIAN_FRONTEND=noninteractive` | apt не интерактивит |
 
-Решение сохраняется в `~/.dotfiles/install.conf` (`bootstrap=y|n`), поэтому
-повторные запуски `./install.sh` ничего не спрашивают. Общая helper-функция
-`ask_yes` находится в `installers/noninteractive.sh` — используйте её во всех
-новых скриптах установки.
+Вопрос про bootstrap задаётся **при каждом запуске** `./install.sh`, чтобы решение
+можно было поменять. Предыдущий выбор пишется в `~/.dotfiles/install.conf`
+(`bootstrap=y|n`) и используется только как default подсказки: «(в прошлый раз: y)».
+Helper-функция `ask_yes` находится в `installers/noninteractive.sh` — используйте её
+во всех новых скриптах установки.
 
 ### AI-агенты: команда `prep`
 

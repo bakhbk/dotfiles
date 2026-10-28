@@ -3,10 +3,10 @@
 # Install common configuration files to the local or remote machine.
 # Regarding usage see the README.md.
 #
-#   ./install.sh                # спросит один раз, затем выбор запоминается
+#   ./install.sh                # спрашивает каждый раз (подсказывает прошлый выбор)
 #   ./install.sh -y             # bootstrap + всё без вопросов (non-interactive)
-#   ./install.sh --no-bootstrap # только конфиги shell'а
-#   ./install.sh --ask          # спросить снова, даже если выбор уже сохранён
+#   ./install.sh --no-bootstrap # только конфиги shell'а, без вопроса
+#   ./install.sh --bootstrap    # bootstrap без вопроса
 
 set -euxo pipefail
 
@@ -15,7 +15,6 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 DOTFILES_ASSUME_YES=0
 BOOTSTRAP_CHOICE=""
-FORCE_ASK=0
 for arg in "$@"; do
   case "$arg" in
     -y | --yes | --bootstrap)
@@ -26,30 +25,27 @@ for arg in "$@"; do
       BOOTSTRAP_CHOICE=n
       DOTFILES_ASSUME_YES=1
       ;;
-    --ask)
-      FORCE_ASK=1
-      ;;
     *) echo "ℹ️ Неизвестный аргумент: $arg" ;;
   esac
 done
 
 STATE_FILE="$HOME/.dotfiles/install.conf"
 
-# Remembered choice from previous runs
-if [[ -z "$BOOTSTRAP_CHOICE" && -f "$STATE_FILE" && $FORCE_ASK -eq 0 ]]; then
-  BOOTSTRAP_CHOICE=$(sed -n 's/^bootstrap=\([yn]\)/\1/p' "$STATE_FILE" | head -1)
-  if [[ -n "$BOOTSTRAP_CHOICE" ]]; then
-    DOTFILES_ASSUME_YES=1
-    echo "ℹ️ Решение уже сохранено в ${STATE_FILE} (bootstrap=${BOOTSTRAP_CHOICE}) — не спрашиваем."
-    echo "   Изменить: ./install.sh --ask  |  ./install.sh --no-bootstrap"
-  fi
+# Only used as a hint: we still ask on every run
+LAST_CHOICE=""
+if [[ -f "$STATE_FILE" ]]; then
+  LAST_CHOICE=$(sed -n 's/^bootstrap=\([yn]\)/\1/p' "$STATE_FILE" | head -1)
 fi
 
-# Ask only once
+# Ask every time unless -y / --no-bootstrap was given
 if [[ -z "$BOOTSTRAP_CHOICE" ]]; then
   source installers/noninteractive.sh
   DOTFILES_ASSUME_YES=0
-  if ask_yes "Запустить ./scripts/bootstrap.sh --install (zsh, bat, tmux, neovim, uv, prep)?"; then
+  PROMPT="Запустить ./scripts/bootstrap.sh --install (zsh, bat, tmux, neovim, uv, prep)?"
+  if [[ -n "$LAST_CHOICE" ]]; then
+    PROMPT+=" (в прошлый раз: ${LAST_CHOICE})"
+  fi
+  if ask_yes "$PROMPT" "${LAST_CHOICE:-y}"; then
     BOOTSTRAP_CHOICE=y
   else
     BOOTSTRAP_CHOICE=n
@@ -64,9 +60,9 @@ export DEBIAN_FRONTEND=noninteractive
 
 mkdir -p "$HOME/.dotfiles"
 {
-  echo "# Решение пользователя, запоминается между запусками ./install.sh"
+  echo "# Последнее решение пользователя (используется только как подсказка при следующем запуске)"
   echo "bootstrap=$BOOTSTRAP_CHOICE"
-  echo "assume_yes=1"
+  echo "ran_at=$(date -Iseconds)"
 } > "$STATE_FILE"
 
 # Extracted clipboard helper installer

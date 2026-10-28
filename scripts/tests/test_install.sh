@@ -42,21 +42,22 @@ check "uv available" "command -v uv >/dev/null"
 # 3. no prompts anywhere in the run
 check "no interactive prompt" "! grep -qiE 'Do you want to proceed|read -r -p .*\[y/n\]' /tmp/install-test.log"
 
-# 4. decision is remembered
+# 4. the decision is logged, but re-asked on the next run
 check "install.conf written" "grep -q '^bootstrap=y' $H1/.dotfiles/install.conf"
 run_install "$H1"
-check "second run does not ask" "grep -q 'Решение уже сохранено' /tmp/install-test.log"
+check "second run asks again" "grep -q 'Запустить ./scripts/bootstrap.sh' /tmp/install-test.log"
+check "previous choice shown as default" "grep -q 'в прошлый раз: y' /tmp/install-test.log"
 
-# 5. --no-bootstrap remembers n
+# 5. --no-bootstrap remembers n and is asked with n as default
 H2=$(mktemp -d)
 run_install "$H2" --no-bootstrap
 check "bootstrap=n stored" "grep -q '^bootstrap=n' $H2/.dotfiles/install.conf"
 run_install "$H2"
-check "no prompt when bootstrap=n stored" "! grep -q 'read -r -p' /tmp/install-test.log"
+check "default flips to n after a refusal" "grep -q 'в прошлый раз: n' /tmp/install-test.log"
 
-# 6. --ask forces the question
-run_install "$H2" --ask
-check "--ask shows the question" "grep -q 'Запустить ./scripts/bootstrap.sh' /tmp/install-test.log"
+# 6. -y never asks
+run_install "$H2" -y
+check "-y runs without any question" "! grep -q 'ask_yes' /tmp/install-test.log"
 
 # 7. configs are copied regardless of arguments
 check "zsh_aliases copied" "grep -q 'alias prep-fast' $H2/.dotfiles/zsh_aliases"
