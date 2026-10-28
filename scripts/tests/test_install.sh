@@ -28,6 +28,14 @@ run_install() {
   return 0
 }
 
+# Same, but pretend uv is not installed anywhere (no ~/.local/bin on PATH)
+run_install_without_uv() {
+  env PATH=/usr/bin:/bin HOME="$1" bash "$REPO/install.sh" "${@:2}" </dev/null >/tmp/install-test.log 2>&1
+  local rc=$?
+  echo "exit=$rc" >> /tmp/install-test.log
+  return 0
+}
+
 # 1. first run with -y
 H1=$(mktemp -d)
 run_install "$H1" -y
@@ -64,6 +72,19 @@ check "zsh_aliases copied" "grep -q 'alias prep-fast' $H2/.dotfiles/zsh_aliases"
 check "prep has python3 fallback (zsh)" "grep -q 'python3' $H2/.dotfiles/zsh_aliases"
 check "prep has python3 fallback (wrapper)" "grep -q 'python3' $H2/.local/bin/prep"
 check "doctor.sh is executable" "[ -x $REPO/installers/doctor.sh ]"
+
+# 8. declining the bootstrap must NOT pull uv (no brew, no 500MB of llvm/rust)
+H3=$(mktemp -d)
+mkdir -p "$H3/.dotfiles"
+printf 'bootstrap=n\n' > "$H3/.dotfiles/install.conf"
+run_install_without_uv "$H3"
+check "uv skipped when bootstrap=n" "grep -q 'uv не устанавливаем' /tmp/install-test.log"
+check "no uv download attempted" "! grep -q 'Устанавливаем uv' /tmp/install-test.log"
+check "prep still runs via python3" "env PATH=/usr/bin:/bin DOTFILES_DIR=$REPO $H3/.local/bin/prep --help >/dev/null 2>&1"
+
+# 9. --uv forces it even without bootstrap
+run_install_without_uv "$H3" --uv
+check "--uv overrides the refusal" "grep -q 'Устанавливаем uv' /tmp/install-test.log"
 
 echo
 echo "Passed: $PASS, Failed: $FAIL"

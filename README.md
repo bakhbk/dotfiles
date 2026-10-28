@@ -8,6 +8,8 @@ Configuration files and useful scripts for OS X and Linux.
 $ ./install.sh                # каждый раз спрашивает (подсказывает прошлый выбор)
 $ ./install.sh -y             # bootstrap + всё без вопросов
 $ ./install.sh --no-bootstrap # только конфиги shell'а
+$ ./install.sh --uv           # всё равно установить uv
+$ ./install.sh --no-uv        # не устанавливать uv (prep через python3)
 ```
 
 Конфиги копируются в `~/.dotfiles`, а `.zshrc`/`.bashrc`/`.tmux.conf` — в `~/`.
@@ -32,8 +34,9 @@ Helper-функция `ask_yes` находится в `installers/noninteractive
 
 ### AI-агенты: команда `prep`
 
-`install.sh` всегда устанавливает `uv` и настраивает команду `prep`
-(синхронизация моделей между pi, kilo, opencode, Zed, VS Code):
+`install.sh` настраивает команду `prep` всегда, а `uv` устанавливает **только если
+вы согласились на доп. пакеты** (или явно указали `--uv`). Если uv нет, `prep`
+работает через `python3` — скрипт `prep-agents.py` использует только stdlib:
 
 ```bash
 prep                # обычный запуск

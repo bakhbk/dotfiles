@@ -135,7 +135,9 @@ remove_packages() {
 # Установка uv и команды prep (синхронизация моделей AI-агентов)
 install_uv_and_prep() {
   REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-  run_no_prompt "$REPO_DIR/installers/install_uv.sh" || echo "⚠️ uv не установлен — prep будет работать только через ~/dotfiles/installers/install_uv.sh"
+  # bootstrap == user agreed to extra packages
+  export DOTFILES_INSTALL_UV="${DOTFILES_INSTALL_UV:-1}"
+  run_no_prompt "$REPO_DIR/installers/install_uv.sh" || echo "⚠️ uv не установлен — prep будет работать через python3"
   run_no_prompt "$REPO_DIR/installers/install_prep.sh" || echo "⚠️ prep не настроен"
 }
 

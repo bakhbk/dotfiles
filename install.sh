@@ -7,6 +7,8 @@
 #   ./install.sh -y             # bootstrap + всё без вопросов (non-interactive)
 #   ./install.sh --no-bootstrap # только конфиги shell'а, без вопроса
 #   ./install.sh --bootstrap    # bootstrap без вопроса
+#   ./install.sh --uv           # всё равно установить uv
+#   ./install.sh --no-uv        # не устанавливать uv (prep через python3)
 
 set -euxo pipefail
 
@@ -15,6 +17,7 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 DOTFILES_ASSUME_YES=0
 BOOTSTRAP_CHOICE=""
+UV_CHOICE=""
 for arg in "$@"; do
   case "$arg" in
     -y | --yes | --bootstrap)
@@ -24,6 +27,12 @@ for arg in "$@"; do
     --no-bootstrap)
       BOOTSTRAP_CHOICE=n
       DOTFILES_ASSUME_YES=1
+      ;;
+    --uv)
+      UV_CHOICE=1
+      ;;
+    --no-uv)
+      UV_CHOICE=0
       ;;
     *) echo "ℹ️ Неизвестный аргумент: $arg" ;;
   esac
@@ -52,8 +61,18 @@ if [[ -z "$BOOTSTRAP_CHOICE" ]]; then
   fi
 fi
 
+# uv ставится только если пользователь согласился на доп. пакеты (или попросил явно)
+if [[ -z "$UV_CHOICE" ]]; then
+  if [[ "$BOOTSTRAP_CHOICE" == "y" ]]; then
+    UV_CHOICE=1
+  else
+    UV_CHOICE=0
+  fi
+fi
+
 # Consent given -> every nested installer runs non-interactively
 export DOTFILES_ASSUME_YES=1
+export DOTFILES_INSTALL_UV="$UV_CHOICE"
 export HOMEBREW_NO_ASK=1
 export HOMEBREW_NO_INSTALL_CLEANUP=1
 export DEBIAN_FRONTEND=noninteractive
@@ -62,6 +81,7 @@ mkdir -p "$HOME/.dotfiles"
 {
   echo "# Последнее решение пользователя (используется только как подсказка при следующем запуске)"
   echo "bootstrap=$BOOTSTRAP_CHOICE"
+  echo "install_uv=$UV_CHOICE"
   echo "ran_at=$(date -Iseconds)"
 } > "$STATE_FILE"
 
