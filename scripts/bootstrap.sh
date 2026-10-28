@@ -96,6 +96,13 @@ remove_packages() {
   done
 }
 
+# Установка uv и команды prep (синхронизация моделей AI-агентов)
+install_uv_and_prep() {
+  REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  "$REPO_DIR/installers/install_uv.sh" || echo "⚠️ uv не установлен — prep будет работать только через ~/dotfiles/installers/install_uv.sh"
+  "$REPO_DIR/installers/install_prep.sh" || echo "⚠️ prep не настроен"
+}
+
 # Функция установки и обновления ZSH-плагинов
 install_zsh_plugins() {
   install_or_update_zsh_plugin() {
@@ -166,6 +173,7 @@ case "$1" in
 --install | -i)
   echo "🚀 Запуск установки..."
   install_packages
+  install_uv_and_prep
   install_zsh_plugins
   [[ "$OS" == "Darwin" ]] && configure_macos
   echo "✅ Установка завершена!"

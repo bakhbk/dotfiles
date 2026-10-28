@@ -44,18 +44,11 @@ path+=(/bin)
 path+=(/usr/sbin)
 path+=(/sbin)
 
-# Load scripts
-source ~/.dotfiles/zsh_aliases
-source ~/.dotfiles/zsh_tools
-source ~/.dotfiles/gw
-source ~/.dotfiles/agent-runner.sh
-source ~/.dotfiles/zshenv
-source ~/.dotfiles/create_tmux_session.sh
-source ~/.dotfiles/commit.sh
-source ~/.dotfiles/fvm_tools.sh
-source ~/.dotfiles/clean.sh
-source ~/.dotfiles/charset_fix.sh
-source ~/.dotfiles/project_clean.sh
+# Load scripts (пропускаем отсутствующие, чтобы не ронять .zshrc)
+for f in zsh_aliases zsh_tools gw agent-runner.sh zshenv create_tmux_session.sh \
+         commit.sh fvm_tools.sh ollama_fzf.sh clean.sh charset_fix.sh project_clean.sh; do
+    [ -f ~/.dotfiles/$f ] && source ~/.dotfiles/$f
+done
 if [ -f ~/work/.zshrc ]; then
   source ~/work/.zshrc
 fi

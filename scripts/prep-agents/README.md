@@ -4,15 +4,22 @@
 
 ## 🚀 Быстрый старт
 
-### Алиас `prep`
+### Команда `prep`
 
-В `~/.zsh_aliases` добавлен алиас:
+`./install.sh` автоматически:
+1. ставит `uv` (`installers/install_uv.sh`);
+2. пишет путь к репозиторию в `~/.dotfiles/dotfiles.env` (`export DOTFILES_DIR=...`);
+3. создаёт wrapper `~/.local/bin/prep` (работает и в zsh, и в bash).
+
+В `~/.dotfiles/zsh_aliases` (файл `shell/zsh_aliases`) определены функция `prep`
+и алиасы-пресеты:
 
 ```bash
 prep                    # тихий режим (только ошибки)
 prep -v                 # verbose (все логи)
 prep --max-context 80000
 prep --provider START
+prep-fast / prep-code / prep-deep / prep-big / prep-clean
 ```
 
 ### Полный запуск

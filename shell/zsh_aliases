@@ -43,7 +43,7 @@ unalias dumpdir 2>/dev/null   # allow reload: drop leftover alias from a previou
 dumpdir() {
     local src="${1:-.}" tmp
     tmp=$(mktemp "${TMPDIR:-/tmp}/dumpdir.XXXXXX")
-    if python3 "$HOME/dotfiles/scripts/dumpdir.py" "$src" > "$tmp"; then
+    if python3 "${DOTFILES_DIR:-$HOME/dotfiles}/scripts/dumpdir.py" "$src" > "$tmp"; then
         if command -v pbcopy >/dev/null 2>&1; then
             pbcopy < "$tmp"
             echo "✅ $(wc -l < "$tmp" | tr -d ' ') lines copied to clipboard (secrets masked)"
@@ -254,10 +254,25 @@ pp() { echo "" > /tmp/prompt.md && nvim /tmp/prompt.md && PP="$(cat /tmp/prompt.
 ppi() { pp && pi -ne -ns -np --system-prompt "$PP" "$@"; }
 
 # Prep agents — sync models across all AI tools
-# Prep agents — sync models across all AI tools
-alias prep='uv run ~/dotfiles/scripts/prep-agents/prep-agents.py'
-alias prep-fast='uv run ~/dotfiles/scripts/prep-agents/prep-agents.py --max-context 8000'
-alias prep-code='uv run ~/dotfiles/scripts/prep-agents/prep-agents.py --max-context 16000'
-alias prep-deep='uv run ~/dotfiles/scripts/prep-agents/prep-agents.py --max-context 32000'
-alias prep-big='uv run ~/dotfiles/scripts/prep-agents/prep-agents.py --max-context 64000'
-alias prep-clean='uv run ~/dotfiles/scripts/prep-agents/prep-agents.py --cleanup'
+# Где лежит репозиторий dotfiles (пишет installers/install_prep.sh)
+if [[ -f ~/.dotfiles/dotfiles.env ]]; then
+    source ~/.dotfiles/dotfiles.env
+fi
+: "${DOTFILES_DIR:=$HOME/dotfiles}"
+
+prep() {
+    if ! command -v uv &> /dev/null; then
+        echo "❌ prep: не найден uv. Выполните: $DOTFILES_DIR/installers/install_uv.sh" >&2
+        return 1
+    fi
+    if [[ ! -f "$DOTFILES_DIR/scripts/prep-agents/prep-agents.py" ]]; then
+        echo "❌ prep: не найден $DOTFILES_DIR/scripts/prep-agents/prep-agents.py (git pull + ./install.sh)" >&2
+        return 1
+    fi
+    uv run "$DOTFILES_DIR/scripts/prep-agents/prep-agents.py" "$@"
+}
+alias prep-fast='prep --max-context 8000'
+alias prep-code='prep --max-context 16000'
+alias prep-deep='prep --max-context 32000'
+alias prep-big='prep --max-context 64000'
+alias prep-clean='prep --cleanup'
