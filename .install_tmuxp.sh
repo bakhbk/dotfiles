@@ -1,4 +1,6 @@
 #!/bin/bash
+# Non-interactive: пользователь уже согласился на установку (см. install.sh)
+export HOMEBREW_NO_ASK=1 HOMEBREW_NO_INSTALL_CLEANUP=1 DEBIAN_FRONTEND=noninteractive
 
 # Проверяем, установлен ли tmuxp
 if brew list tmuxp &>/dev/null; then

@@ -5,14 +5,30 @@ Configuration files and useful scripts for OS X and Linux.
 ## Installation
 
 ```bash
-# To install common configuration files on localhost do:
-$ ./install.sh              # спросит, запускать ли bootstrap
-$ ./install.sh -y           # bootstrap сразу (zsh, bat, tmux, neovim, uv, prep)
-$ ./install.sh --no-bootstrap   # только конфиги shell'а
+$ ./install.sh                # спросит один раз, дальше выбор запоминается
+$ ./install.sh -y             # bootstrap + всё без вопросов
+$ ./install.sh --no-bootstrap # только конфиги shell'а
+$ ./install.sh --ask          # спросить снова
 ```
 
 Конфиги копируются в `~/.dotfiles`, а `.zshrc`/`.bashrc`/`.tmux.conf` — в `~/`.
 Это происходит **независимо от аргументов** скрипта.
+
+### Один «да» — и больше ни один скрипт не спрашивает
+
+После подтверждения `install.sh` экспортирует:
+
+| Переменная | Эффект |
+|---|---|
+| `DOTFILES_ASSUME_YES=1` | все вложенные install'er'ы работают без вопросов |
+| `HOMEBREW_NO_ASK=1` | Homebrew не спрашивает «Do you want to proceed with the installation? [y/n]» |
+| `HOMEBREW_NO_INSTALL_CLEANUP=1` | без лишней уборки Cellar |
+| `DEBIAN_FRONTEND=noninteractive` | apt не интерактивит |
+
+Решение сохраняется в `~/.dotfiles/install.conf` (`bootstrap=y|n`), поэтому
+повторные запуски `./install.sh` ничего не спрашивают. Общая helper-функция
+`ask_yes` находится в `installers/noninteractive.sh` — используйте её во всех
+новых скриптах установки.
 
 ### AI-агенты: команда `prep`
 
@@ -36,6 +52,12 @@ prep-clean          # --cleanup
 # Только uv/prep, без остального, без остального
 $ ./installers/install_uv.sh
 $ ./installers/install_prep.sh
+```
+
+### Проверка установки
+
+```bash
+$ ./scripts/tests/test_install.sh   # 12 проверок: prep, uv, отсутствие prompts
 ```
 
 ## Docker/OrbStack

@@ -3,30 +3,71 @@
 # Install common configuration files to the local or remote machine.
 # Regarding usage see the README.md.
 #
-#   ./install.sh                     # спросит, запускать ли bootstrap
-#   ./install.sh -y                  # bootstrap без вопроса
-#   ./install.sh --no-bootstrap      # только конфиги shell'а
+#   ./install.sh                # спросит один раз, затем выбор запоминается
+#   ./install.sh -y             # bootstrap + всё без вопросов (non-interactive)
+#   ./install.sh --no-bootstrap # только конфиги shell'а
+#   ./install.sh --ask          # спросить снова, даже если выбор уже сохранён
 
 set -euxo pipefail
 
 # Запуск из любой директории: переходим в корень dotfiles
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-RUN_BOOTSTRAP=false
+DOTFILES_ASSUME_YES=0
+BOOTSTRAP_CHOICE=""
+FORCE_ASK=0
 for arg in "$@"; do
   case "$arg" in
-    -y | --yes | --bootstrap) RUN_BOOTSTRAP=true ;;
-    --no-bootstrap) RUN_BOOTSTRAP=false ;;
+    -y | --yes | --bootstrap)
+      BOOTSTRAP_CHOICE=y
+      DOTFILES_ASSUME_YES=1
+      ;;
+    --no-bootstrap)
+      BOOTSTRAP_CHOICE=n
+      DOTFILES_ASSUME_YES=1
+      ;;
+    --ask)
+      FORCE_ASK=1
+      ;;
     *) echo "ℹ️ Неизвестный аргумент: $arg" ;;
   esac
 done
 
-if ! $RUN_BOOTSTRAP; then
-  read -r -p "Запустить ./scripts/bootstrap.sh --install (zsh, bat, tmux, neovim, uv, prep)? [y/N]: " confirm || confirm=""
-  if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
-    RUN_BOOTSTRAP=true
+STATE_FILE="$HOME/.dotfiles/install.conf"
+
+# Remembered choice from previous runs
+if [[ -z "$BOOTSTRAP_CHOICE" && -f "$STATE_FILE" && $FORCE_ASK -eq 0 ]]; then
+  BOOTSTRAP_CHOICE=$(sed -n 's/^bootstrap=\([yn]\)/\1/p' "$STATE_FILE" | head -1)
+  if [[ -n "$BOOTSTRAP_CHOICE" ]]; then
+    DOTFILES_ASSUME_YES=1
+    echo "ℹ️ Решение уже сохранено в ${STATE_FILE} (bootstrap=${BOOTSTRAP_CHOICE}) — не спрашиваем."
+    echo "   Изменить: ./install.sh --ask  |  ./install.sh --no-bootstrap"
   fi
 fi
+
+# Ask only once
+if [[ -z "$BOOTSTRAP_CHOICE" ]]; then
+  source installers/noninteractive.sh
+  DOTFILES_ASSUME_YES=0
+  if ask_yes "Запустить ./scripts/bootstrap.sh --install (zsh, bat, tmux, neovim, uv, prep)?"; then
+    BOOTSTRAP_CHOICE=y
+  else
+    BOOTSTRAP_CHOICE=n
+  fi
+fi
+
+# Consent given -> every nested installer runs non-interactively
+export DOTFILES_ASSUME_YES=1
+export HOMEBREW_NO_ASK=1
+export HOMEBREW_NO_INSTALL_CLEANUP=1
+export DEBIAN_FRONTEND=noninteractive
+
+mkdir -p "$HOME/.dotfiles"
+{
+  echo "# Решение пользователя, запоминается между запусками ./install.sh"
+  echo "bootstrap=$BOOTSTRAP_CHOICE"
+  echo "assume_yes=1"
+} > "$STATE_FILE"
 
 # Extracted clipboard helper installer
 ./installers/install_clipboard_helpers.sh || true
@@ -47,6 +88,7 @@ CONFIGS=(
   installers/install-oh-my-zsh.sh
   installers/install_uv.sh
   installers/install_prep.sh
+  installers/noninteractive.sh
   git/git_checkout_branch.sh
   git/git_delete_branch.sh
   tmux/tmux_session_selector.sh
@@ -89,8 +131,8 @@ done
 # uv + команда prep — устанавливаются в любом случае
 ./installers/install_prep.sh
 
-if $RUN_BOOTSTRAP; then
-  ./scripts/bootstrap.sh --install || echo "⚠️ bootstrap завершился с ошибкой"
+if [[ "$BOOTSTRAP_CHOICE" == "y" ]]; then
+  ./scripts/bootstrap.sh --install --yes || echo "⚠️ bootstrap завершился с ошибкой"
 fi
 
 echo "✅ Готово. Перезагрузите shell:  reload-zsh"

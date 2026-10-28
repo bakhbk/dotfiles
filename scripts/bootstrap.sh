@@ -2,9 +2,43 @@
 
 # Purpose:
 # Install or remove development tools based on user selection.
+#
+#   ./scripts/bootstrap.sh --install          # interactive prompts allowed
+#   ./scripts/bootstrap.sh --install --yes    # fully non-interactive
+#   DOTFILES_ASSUME_YES=1 ./scripts/bootstrap.sh --install
 
 set -euxo pipefail
 
+# Nested installers must not ask anything once the user consented
+ASSUME_YES=${DOTFILES_ASSUME_YES:-0}
+ACTION=""
+for arg in "$@"; do
+  case "$arg" in
+    --install | -i) ACTION=install ;;
+    --clean | -c) ACTION=clean ;;
+    --yes | -y) ASSUME_YES=1 ;;
+    *) echo "ℹ️ Неизвестный аргумент: $arg" ;;
+  esac
+done
+
+if [[ -z "$ACTION" ]]; then
+  echo "❌ Использование: $0 --install [-y] | --clean [-y]"
+  exit 1
+fi
+
+export DOTFILES_ASSUME_YES="$ASSUME_YES"
+export HOMEBREW_NO_ASK=1
+export HOMEBREW_NO_INSTALL_CLEANUP=1
+export DEBIAN_FRONTEND=noninteractive
+
+# Helper: run a command without letting it prompt for input
+run_no_prompt() {
+  if [[ "$ASSUME_YES" == "1" ]]; then
+    "$@" < /dev/null
+  else
+    "$@"
+  fi
+}
 # Определяем ОС
 OS=$(uname -s)
 
@@ -49,6 +83,8 @@ install_packages() {
       echo "✅ $package уже установлен, пропускаем..."
     else
       if [[ "$PACKAGE_MANAGER" == "brew" ]]; then
+        # HOMEBREW_NO_ASK=1 (exported above)suppresses the
+        # "Do you want to proceed with the installation? [y/n]" prompt
         brew install "$package"
       elif [[ "$PACKAGE_MANAGER" == "apt" ]]; then
         sudo apt update && sudo apt install -y "$package"
@@ -99,8 +135,8 @@ remove_packages() {
 # Установка uv и команды prep (синхронизация моделей AI-агентов)
 install_uv_and_prep() {
   REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-  "$REPO_DIR/installers/install_uv.sh" || echo "⚠️ uv не установлен — prep будет работать только через ~/dotfiles/installers/install_uv.sh"
-  "$REPO_DIR/installers/install_prep.sh" || echo "⚠️ prep не настроен"
+  run_no_prompt "$REPO_DIR/installers/install_uv.sh" || echo "⚠️ uv не установлен — prep будет работать только через ~/dotfiles/installers/install_uv.sh"
+  run_no_prompt "$REPO_DIR/installers/install_prep.sh" || echo "⚠️ prep не настроен"
 }
 
 # Функция установки и обновления ZSH-плагинов
@@ -163,29 +199,28 @@ restore_macos_defaults() {
   defaults write NSGlobalDomain ApplePressAndHoldEnabled -bool true
 }
 
-# Главный блок: проверяем переданный аргумент
-if [[ "$#" -ne 1 ]]; then
-  echo "❌ Использование: $0 --install | -i | --clean | -c"
-  exit 1
-fi
-
-case "$1" in
---install | -i)
-  echo "🚀 Запуск установки..."
-  install_packages
-  install_uv_and_prep
-  install_zsh_plugins
-  [[ "$OS" == "Darwin" ]] && configure_macos
-  echo "✅ Установка завершена!"
-  ;;
---clean | -c)
-  echo "🗑 Запуск очистки..."
-  remove_packages
-  [[ "$OS" == "Darwin" ]] && restore_macos_defaults
-  echo "✅ Очистка завершена!"
-  ;;
-*)
-  echo "❌ Неверный аргумент. Используйте: $0 --install | -i | --clean | -c"
-  exit 1
-  ;;
+# Главный блок: действие определено в начале файла
+case "$ACTION" in
+  install)
+    echo "🚀 Запуск установки..."
+    install_packages
+    install_uv_and_prep
+    install_zsh_plugins
+    if [[ "$OS" == "Darwin" ]]; then
+      configure_macos
+    fi
+    echo "✅ Установка завершена!"
+    ;;
+  clean)
+    echo "🗑 Запуск очистки..."
+    remove_packages
+    if [[ "$OS" == "Darwin" ]]; then
+      restore_macos_defaults
+    fi
+    echo "✅ Очистка завершена!"
+    ;;
+  *)
+    echo "❌ Неверный аргумент. Используйте: $0 --install | -i | --clean | -c"
+    exit 1
+    ;;
 esac
