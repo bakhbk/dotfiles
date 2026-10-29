@@ -101,6 +101,7 @@ CONFIGS=(
   shell/shell_prompt
   shell/minimal.zshrc
   shell/nvmv.sh
+  shell/themes
   installers/install-oh-my-zsh.sh
   installers/install_uv.sh
   installers/install_prep.sh
@@ -134,7 +135,7 @@ done
 
 mkdir -p ~/.dotfiles
 for i in "${CONFIGS[@]}"; do
-  if [ ! -f "${i}" ]; then
+  if [ ! -e "${i}" ]; then
     echo "⚠️  пропускаем ${i} — файла нет в репозитории" >&2
     continue
   fi
