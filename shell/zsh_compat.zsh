@@ -1,0 +1,55 @@
+# Purpose: single OS-detection point + cross-platform primitives.
+# Sourced before zsh_aliases/zsh_tools. Platform files override defaults.
+[[ -n "${_COMPAT_LOADED:-}" ]] && return
+typeset -g _COMPAT_LOADED=1
+
+typeset -g _OS=unknown
+case "$OSTYPE" in
+    darwin*)  _OS=macos ;;
+    linux*)   _OS=linux ;;
+    freebsd*) _OS=bsd ;;
+    gnu*)     _OS=linux ;;
+esac
+
+_has() { whence -p "$1" >/dev/null 2>&1; }
+
+# Clipboard (capability based: works on macOS, Linux/X11, Wayland, Docker)
+_clip_copy() {
+    if _has pbcopy; then pbcopy
+    elif _has wl-copy; then wl-copy
+    elif _has xclip; then xclip -selection clipboard
+    elif _has xsel; then xsel -b
+    else return 1; fi
+}
+
+_clip_paste() {
+    if _has pbpaste; then pbpaste
+    elif _has wl-paste; then wl-paste
+    elif _has xclip; then xclip -selection clipboard -o
+    elif _has xsel; then xsel -b
+    else return 1; fi
+}
+
+# App data roots (used by clean.sh)
+typeset -g CACHE_ROOT="$HOME/.cache"
+typeset -g SUPPORT_ROOT="$HOME/.config"
+typeset -g LOG_ROOT="$HOME/.local/share/logs"
+
+# Fallbacks; overridden by macos_impl.zsh / linux_impl.zsh
+_local_ip()   { echo 'n/a'; }
+_iface()      { echo ''; }
+_gateway()    { echo ''; }
+_open_file()  { echo "open: unsupported on $_OS" >&2; return 1; }
+_lock_file()  { return 1; }
+_unlock_file() { return 1; }
+_cache_dir()  { echo "$CACHE_ROOT"; }
+_adb_path()   { echo ''; }
+_net_ifaces() { echo ''; }
+_list_ports() { lsof -iTCP -sTCP:LISTEN -P -n; }
+_pkg_install() { echo "no package manager on $_OS" >&2; return 1; }
+
+[[ -f "$HOME/.dotfiles/dotfiles.env" ]] && source "$HOME/.dotfiles/dotfiles.env"
+typeset -ga _compat_dirs=("$HOME/.dotfiles" "${DOTFILES_DIR:-}" "${DOTFILES_DIR:-$HOME/dotfiles}/shell" "$HOME/dotfiles/shell" "$HOME/.zsh")
+for _compat_dir in "${_compat_dirs[@]}"; do
+    [[ -n "$_compat_dir" && -f "$_compat_dir/${_OS}_impl.zsh" ]] && { source "$_compat_dir/${_OS}_impl.zsh"; break; }
+done

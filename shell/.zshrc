@@ -45,7 +45,7 @@ path+=(/usr/sbin)
 path+=(/sbin)
 
 # Load scripts (пропускаем отсутствующие, чтобы не ронять .zshrc)
-for f in zsh_aliases zsh_tools gw agent-runner.sh zshenv create_tmux_session.sh \
+for f in zsh_compat zsh_aliases zsh_tools gw agent-runner.sh zshenv create_tmux_session.sh \
          commit.sh fvm_tools.sh ollama_fzf.sh clean.sh charset_fix.sh project_clean.sh; do
     [ -f ~/.dotfiles/$f ] && source ~/.dotfiles/$f
 done

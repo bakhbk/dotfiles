@@ -1,0 +1,32 @@
+# Linux (GNU) implementation of the primitives from zsh_compat.zsh
+
+_iface()      { ip route 2>/dev/null | awk '/default/{print $5; exit}'; }
+_local_ip()   {
+    local ip
+    ip=$(ip -4 -br addr 2>/dev/null | sed -n 's|.* \([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*\)/.*|\1|p' | grep -v '^127\.' | head -1)
+    [[ -z "$ip" ]] && ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    echo "${ip:-n/a}"
+}
+_gateway()    { ip route 2>/dev/null | awk '/default/{print $3; exit}'; }
+_open_file()  {
+    if _has xdg-open; then xdg-open "$@"
+    elif _has firefox; then firefox "$@"
+    else echo "open: no handler found" >&2; return 1; fi
+}
+_lock_file()   { sudo chattr +i "$1"; }
+_unlock_file() { sudo chattr -i "$1"; }
+_cache_dir()   { echo "${XDG_CACHE_HOME:-$HOME/.cache}"; }
+_adb_path()    { echo "$HOME/android-sdk/platform-tools/adb"; }
+_net_ifaces()  { ip -br link 2>/dev/null | awk '{print $1}'; }
+_list_ports()  {
+    if _has ss; then ss -tulpn
+    elif _has netstat; then netstat -tulanp
+    else lsof -iTCP -sTCP:LISTEN -P -n; fi
+}
+_pkg_install() {
+    if _has apt-get; then sudo apt-get install -y "$@"
+    elif _has dnf; then sudo dnf install -y "$@"
+    elif _has pacman; then sudo pacman -Sy --noconfirm "$@"
+    elif _has zypper; then sudo zypper install -y "$@"
+    else echo "no package manager found" >&2; return 1; fi
+}
