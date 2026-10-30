@@ -151,10 +151,12 @@ __copy_to_clipboard() {
     local src="$1"
     if command -v pbcopy >/dev/null 2>&1; then
         cat "$src" | pbcopy
-    elif command -v wl-copy >/dev/null 2>&1; then
-        cat "$src" | wl-copy
     elif command -v xclip >/dev/null 2>&1; then
         cat "$src" | xclip -selection clipboard
+    elif command -v xsel >/dev/null 2>&1; then
+        cat "$src" | xsel -b
+    elif command -v wl-copy >/dev/null 2>&1; then
+        cat "$src" | wl-copy
     else
         echo "⚠️  No clipboard tool found (pbcopy/wl-copy/xclip)" >&2
         return 1

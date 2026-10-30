@@ -16,17 +16,17 @@ _has() { whence -p "$1" >/dev/null 2>&1; }
 # Clipboard (capability based: works on macOS, Linux/X11, Wayland, Docker)
 _clip_copy() {
     if _has pbcopy; then pbcopy
-    elif _has wl-copy; then wl-copy
     elif _has xclip; then xclip -selection clipboard
     elif _has xsel; then xsel -b
+    elif _has wl-copy; then wl-copy
     else return 1; fi
 }
 
 _clip_paste() {
     if _has pbpaste; then pbpaste
-    elif _has wl-paste; then wl-paste
     elif _has xclip; then xclip -selection clipboard -o
     elif _has xsel; then xsel -b
+    elif _has wl-paste; then wl-paste
     else return 1; fi
 }
 
