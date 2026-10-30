@@ -95,6 +95,7 @@ alias mc='LC_ALL=en_US.UTF8 mc'
 myip() {
     local _public
     _public=$(curl -s --max-time 2 --fail https://ifconfig.me || curl -s --max-time 2 --fail https://icanhazip.com || dig +short myip.opendns.com @resolver1.opendns.com || echo 'n/a')
+    [[ -z "$_public" ]] && _public='n/a'
     echo "local:  $(_local_ip)"
     echo "public: $_public"
 }

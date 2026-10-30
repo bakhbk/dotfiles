@@ -615,6 +615,7 @@ netcheck() {
     # Публичный IP
     local pub_ip="n/a"
     pub_ip=$(curl -s --max-time 2 --fail https://ifconfig.me 2>/dev/null || curl -s --max-time 2 --fail https://icanhazip.com 2>/dev/null || echo 'n/a')
+    [[ -z "$pub_ip" ]] && pub_ip='n/a'
     [ "$pub_ip" != "n/a" ] && echo "   🌐 Публичный IP: $pub_ip" || echo "   🌐 Публичный IP: не определяется"
     
     # HTTP проверка
