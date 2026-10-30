@@ -36,8 +36,8 @@ clean() {
     echo "  --rust       Cargo registry & git db cache"
     echo "  --python     uv, pip, pyenv, Poetry caches"
     echo "  --dev        Dev tool caches: aider, Neovim, Ollama, .llm, Cline, etc."
-    echo "  --logs       App logs in ~/Library/Logs (>7 days old)"
-    echo "  --caches     ~/Library/Caches for heavy apps (JetBrains, VSCode, etc.)"
+    echo "  --logs       App logs in $LOG_ROOT (>7 days old)"
+    echo "  --caches     $CACHE_ROOT for heavy apps (JetBrains, VSCode, etc.)"
     echo "  --system     DNS flush, font cache, Trash, Time Machine snapshots (sudo)"
     return 0
   fi
@@ -83,7 +83,11 @@ clean() {
     local _o="$_tmp/01_ram"; _outs+=("$_o")
     {
       echo "\n🧠 Freeing inactive RAM..."
-      sudo -n purge && echo "  ✓ purge done"
+      if [[ "$_OS" = macos ]]; then
+          sudo -n purge && echo "  ✓ purge done"
+      else
+          echo "  · nothing to purge on $_OS"
+      fi
     } >"$_o" 2>&1 &
     _pids+=($!)
   fi
@@ -100,7 +104,7 @@ clean() {
   fi
 
   # ── Xcode ────────────────────────────────────────────────────────────────
-  if [[ $do_xcode -eq 1 ]]; then
+  if [[ $do_xcode -eq 1 && $_OS = macos ]]; then
     local _o="$_tmp/03_xcode"; _outs+=("$_o")
     {
       echo "\n📱 Xcode cleanup..."
@@ -114,7 +118,7 @@ clean() {
       xcrun simctl runtime delete all 2>/dev/null && echo "  ✓ simulator runtimes deleted"
       sudo -n rm -rf /Library/Developer/CoreSimulator/Caches 2>/dev/null && echo "  ✓ System CoreSimulator caches removed"
       pod cache clean --all 2>/dev/null && echo "  ✓ CocoaPods cache cleaned"
-      rm -rf ~/Library/Caches/CocoaPods 2>/dev/null && echo "  ✓ CocoaPods Library cache removed"
+      rm -rf $CACHE_ROOT/CocoaPods 2>/dev/null && echo "  ✓ CocoaPods Library cache removed"
       rm -rf ~/.swiftpm/cache 2>/dev/null && echo "  ✓ SwiftPM cache removed"
     } >"$_o" 2>&1 &
     _pids+=($!)
@@ -129,7 +133,7 @@ clean() {
       rm -rf ~/.dart_tool 2>/dev/null && echo "  ✓ .dart_tool removed"
       rm -rf ~/.gradle/caches 2>/dev/null && echo "  ✓ Gradle caches removed"
       rm -rf ~/.android/cache 2>/dev/null && echo "  ✓ Android SDK cache removed"
-      rm -rf ~/Library/Caches/Google/AndroidStudio* 2>/dev/null && echo "  ✓ Android Studio caches removed"
+      rm -rf $CACHE_ROOT/Google/AndroidStudio* 2>/dev/null && echo "  ✓ Android Studio caches removed"
       fclean 2>/dev/null && echo "  ✓ flutter project build/ dirs removed"
       if command -v fvm &>/dev/null; then
         fvm flutter pub cache clean 2>/dev/null && echo "  ✓ fvm pub cache cleaned"
@@ -177,29 +181,29 @@ clean() {
     local _o="$_tmp/07_browsers"; _outs+=("$_o")
     {
       echo "\n🌐 Browser caches cleanup..."
-      rm -rf ~/Library/Caches/Google/Chrome 2>/dev/null && echo "  ✓ Chrome Caches removed"
-      rm -rf ~/Library/Application\ Support/Google/Chrome/Default/Cache 2>/dev/null
-      rm -rf ~/Library/Application\ Support/Google/Chrome/Default/Code\ Cache 2>/dev/null
-      rm -rf ~/Library/Application\ Support/Google/Chrome/Default/GPUCache 2>/dev/null && echo "  ✓ Chrome profile caches removed"
-      rm -rf ~/Library/Caches/MediaAnalysis 2>/dev/null && echo "  ✓ MediaAnalysis cache removed"
-      rm -rf ~/Library/Caches/com.apple.mediaanalysisd 2>/dev/null
-      rm -rf ~/Library/Caches/ru.yandex.* 2>/dev/null && echo "  ✓ Yandex caches removed"
-      rm -rf ~/Library/Application\ Support/Yandex/YandexBrowser/Default/Cache 2>/dev/null
-      rm -rf ~/Library/Application\ Support/Yandex/YandexBrowser/Default/Code\ Cache 2>/dev/null
-      rm -rf ~/Library/Application\ Support/Yandex/YandexBrowser/Default/GPUCache 2>/dev/null
-      rm -rf ~/Library/Application\ Support/Yandex/YandexBrowser/Default/DawnWebGPUCache 2>/dev/null
-      rm -rf ~/Library/Application\ Support/Yandex/YandexBrowser/Default/DawnGraphiteCache 2>/dev/null
-      rm -rf ~/Library/Application\ Support/Yandex/YandexBrowser/Default/TurboAppCache 2>/dev/null
-      rm -rf ~/Library/Application\ Support/Yandex/YandexBrowser/ShaderCache 2>/dev/null
-      rm -rf ~/Library/Application\ Support/Yandex/YandexBrowser/GraphiteDawnCache 2>/dev/null
-      rm -rf ~/Library/Application\ Support/Yandex/YandexBrowser/GrShaderCache 2>/dev/null && echo "  ✓ Yandex App Support caches removed"
-      rm -rf ~/Library/Caches/Firefox 2>/dev/null && echo "  ✓ Firefox cache removed"
-      rm -rf ~/Library/Caches/com.apple.Safari 2>/dev/null && echo "  ✓ Safari cache removed"
+      rm -rf $CACHE_ROOT/Google/Chrome 2>/dev/null && echo "  ✓ Chrome Caches removed"
+      rm -rf $SUPPORT_ROOT/Google/Chrome/Default/Cache 2>/dev/null
+      rm -rf $SUPPORT_ROOT/Google/Chrome/Default/Code\ Cache 2>/dev/null
+      rm -rf $SUPPORT_ROOT/Google/Chrome/Default/GPUCache 2>/dev/null && echo "  ✓ Chrome profile caches removed"
+      rm -rf $CACHE_ROOT/MediaAnalysis 2>/dev/null && echo "  ✓ MediaAnalysis cache removed"
+      rm -rf $CACHE_ROOT/com.apple.mediaanalysisd 2>/dev/null
+      rm -rf $CACHE_ROOT/ru.yandex.* 2>/dev/null && echo "  ✓ Yandex caches removed"
+      rm -rf $SUPPORT_ROOT/Yandex/YandexBrowser/Default/Cache 2>/dev/null
+      rm -rf $SUPPORT_ROOT/Yandex/YandexBrowser/Default/Code\ Cache 2>/dev/null
+      rm -rf $SUPPORT_ROOT/Yandex/YandexBrowser/Default/GPUCache 2>/dev/null
+      rm -rf $SUPPORT_ROOT/Yandex/YandexBrowser/Default/DawnWebGPUCache 2>/dev/null
+      rm -rf $SUPPORT_ROOT/Yandex/YandexBrowser/Default/DawnGraphiteCache 2>/dev/null
+      rm -rf $SUPPORT_ROOT/Yandex/YandexBrowser/Default/TurboAppCache 2>/dev/null
+      rm -rf $SUPPORT_ROOT/Yandex/YandexBrowser/ShaderCache 2>/dev/null
+      rm -rf $SUPPORT_ROOT/Yandex/YandexBrowser/GraphiteDawnCache 2>/dev/null
+      rm -rf $SUPPORT_ROOT/Yandex/YandexBrowser/GrShaderCache 2>/dev/null && echo "  ✓ Yandex App Support caches removed"
+      rm -rf $CACHE_ROOT/Firefox 2>/dev/null && echo "  ✓ Firefox cache removed"
+      rm -rf $CACHE_ROOT/com.apple.Safari 2>/dev/null && echo "  ✓ Safari cache removed"
       rm -rf ~/Library/Safari/LocalStorage 2>/dev/null && echo "  ✓ Safari LocalStorage removed"
-      rm -rf ~/Library/Application\ Support/Cursor/Cache 2>/dev/null
-      rm -rf ~/Library/Application\ Support/Cursor/Code\ Cache 2>/dev/null
-      rm -rf ~/Library/Application\ Support/Cursor/GPUCache 2>/dev/null && echo "  ✓ Cursor caches removed"
-      rm -rf ~/Library/Caches/company.thebrowser.Browser 2>/dev/null && echo "  ✓ Arc cache removed"
+      rm -rf $SUPPORT_ROOT/Cursor/Cache 2>/dev/null
+      rm -rf $SUPPORT_ROOT/Cursor/Code\ Cache 2>/dev/null
+      rm -rf $SUPPORT_ROOT/Cursor/GPUCache 2>/dev/null && echo "  ✓ Cursor caches removed"
+      rm -rf $CACHE_ROOT/company.thebrowser.Browser 2>/dev/null && echo "  ✓ Arc cache removed"
     } >"$_o" 2>&1 &
     _pids+=($!)
   fi
@@ -240,7 +244,7 @@ clean() {
       rm -rf ~/.cache/uv 2>/dev/null && echo "  ✓ ~/.cache/uv removed"
       rm -rf ~/.cache/pip 2>/dev/null && echo "  ✓ pip cache removed"
       rm -rf ~/.pyenv/cache 2>/dev/null && echo "  ✓ pyenv download cache removed"
-      rm -rf ~/Library/Caches/pypoetry 2>/dev/null && echo "  ✓ Poetry cache removed"
+      rm -rf $CACHE_ROOT/pypoetry 2>/dev/null && echo "  ✓ Poetry cache removed"
     } >"$_o" 2>&1 &
     _pids+=($!)
   fi
@@ -253,7 +257,7 @@ clean() {
       rm -rf ~/.cache/aider 2>/dev/null && echo "  ✓ aider cache removed"
       rm -rf ~/.aider* 2>/dev/null && echo "  ✓ .aider* removed"
       rm -rf ~/.llm 2>/dev/null && echo "  ✓ .llm removed"
-      rm -rf ~/Library/Application\ Support/io.datasette.llm 2>/dev/null && echo "  ✓ datasette llm removed"
+      rm -rf $SUPPORT_ROOT/io.datasette.llm 2>/dev/null && echo "  ✓ datasette llm removed"
       rm -rf ~/.cocoapods 2>/dev/null && echo "  ✓ .cocoapods removed"
       rm -rf ~/.cline ~/.clinerc 2>/dev/null && echo "  ✓ .cline removed"
       rm -rf ~/.zcompdump* 2>/dev/null && echo "  ✓ zsh completion cache removed"
@@ -275,53 +279,52 @@ clean() {
     local _o="$_tmp/12_logs"; _outs+=("$_o")
     {
       echo "\n📋 Logs cleanup..."
-      rm -rf ~/Library/Logs/CoreSimulator 2>/dev/null && echo "  ✓ CoreSimulator logs removed"
-      find ~/Library/Logs -name "*.log" -mtime +7 -delete 2>/dev/null && echo "  ✓ App logs older than 7 days removed"
+      rm -rf $LOG_ROOT/CoreSimulator 2>/dev/null && echo "  ✓ CoreSimulator logs removed"
+      find $LOG_ROOT -name "*.log" -mtime +7 -delete 2>/dev/null && echo "  ✓ App logs older than 7 days removed"
       rm -rf ~/.npm/_logs/*.log 2>/dev/null && echo "  ✓ npm logs removed"
     } >"$_o" 2>&1 &
     _pids+=($!)
   fi
 
-  # ── App Caches (~/Library/Caches) ─────────────────────────────────────────
+  # ── App Caches ($CACHE_ROOT) ─────────────────────────────────────────
   if [[ $do_caches -eq 1 ]]; then
     local _o="$_tmp/13_caches"; _outs+=("$_o")
     {
       echo "\n🗂  App caches cleanup..."
-      local caches_dir=~/Library/Caches
-      local app_caches=(
-        "com.jetbrains.*"
-        "JetBrains"
-        "com.microsoft.VSCode"
-        "com.todesktop.*"
-        "dev.warp.*"
-        "com.obsidian.*"
-        "com.postmanlabs.*"
-        "com.google.*"
-        "asc.onlyoffice.*"
-        "company.thebrowser.Browser"
-        "com.tinyspeck.slackmacgap"
-        "ru.keepcoder.Telegram"
-        "com.apple.Safari"
-      )
+      local caches_dir="$CACHE_ROOT"
+      local app_caches=()
+      if [[ "$_OS" = macos ]]; then
+        app_caches=(
+          "com.jetbrains.*" "JetBrains" "com.microsoft.VSCode" "com.todesktop.*"
+          "dev.warp.*" "com.obsidian.*" "com.postmanlabs.*" "com.google.*"
+          "asc.onlyoffice.*" "company.thebrowser.Browser" "com.tinyspeck.slackmacgap"
+          "ru.keepcoder.Telegram" "com.apple.Safari"
+        )
+      else
+        app_caches=(
+          "google-chrome" "Chromium" "JetBrains" "yandex" "Mozilla"
+          "code" "postman" "obsidian" "slack" "org.onlyoffice.*"
+        )
+      fi
       for pattern in "${app_caches[@]}"; do
         rm -rf ${caches_dir}/${~pattern}(N) 2>/dev/null
       done
       echo "  ✓ App caches cleaned (JetBrains, VSCode, Warp, Obsidian, Postman, Google, OnlyOffice, Arc, Slack, Telegram, Safari)"
       # VSCode Application Support caches (CachedExtensionVSIXs alone ~375 MB)
-      local vscode_as=~/Library/Application\ Support/Code
+      local vscode_as="$SUPPORT_ROOT/Code"
       rm -rf "$vscode_as/Cache" "$vscode_as/CachedData" "$vscode_as/CachedExtensionVSIXs" \
              "$vscode_as/CachedProfilesData" "$vscode_as/Code Cache" \
              "$vscode_as/GPUCache" "$vscode_as/logs" 2>/dev/null && echo "  ✓ VSCode Application Support caches removed"
       # Remove workspaceStorage entries not accessed for >30 days
       find "$vscode_as/User/workspaceStorage" -maxdepth 1 -mindepth 1 -type d -atime +30 -exec rm -rf {} + 2>/dev/null && echo "  ✓ VSCode stale workspaceStorage removed"
       # Zed editor hang traces
-      rm -rf ~/Library/Application\ Support/Zed/hang_traces 2>/dev/null && echo "  ✓ Zed hang traces removed"
+      rm -rf $SUPPORT_ROOT/Zed/hang_traces 2>/dev/null && echo "  ✓ Zed hang traces removed"
       # cloud-code extension CLI binary (auto re-downloaded on next use)
-      rm -rf ~/Library/Application\ Support/cloud-code/cloudcode_cli 2>/dev/null && echo "  ✓ cloud-code CLI cache removed"
+      rm -rf $SUPPORT_ROOT/cloud-code/cloudcode_cli 2>/dev/null && echo "  ✓ cloud-code CLI cache removed"
       # VSCode WebStorage (IndexedDB / localStorage for extensions)
       rm -rf "$vscode_as/WebStorage" 2>/dev/null && echo "  ✓ VSCode WebStorage removed"
       # Google Updater CRX cache — Chrome auto-refills on next update check
-      rm -rf ~/Library/Application\ Support/Google/GoogleUpdater/crx_cache 2>/dev/null && echo "  ✓ GoogleUpdater CRX cache removed"
+      rm -rf $SUPPORT_ROOT/Google/GoogleUpdater/crx_cache 2>/dev/null && echo "  ✓ GoogleUpdater CRX cache removed"
     } >"$_o" 2>&1 &
     _pids+=($!)
   fi
@@ -331,14 +334,19 @@ clean() {
     local _o="$_tmp/14_system"; _outs+=("$_o")
     {
       echo "\n⚙️  System cleanup..."
-      sudo -n dscacheutil -flushcache 2>/dev/null && sudo -n killall -HUP mDNSResponder 2>/dev/null && echo "  ✓ DNS cache flushed"
-      sudo -n atsutil databases -remove 2>/dev/null && echo "  ✓ Font cache removed"
-      osascript -e 'tell application "Finder" to empty trash' 2>/dev/null && echo "  ✓ Trash emptied"
-      sudo -n rm -rf /private/var/log/asl/*.asl 2>/dev/null && echo "  ✓ ASL system logs removed"
-      # Time Machine local snapshots — hidden reserved space, can be several GB
-      sudo -n tmutil deletelocalsnapshots / 2>/dev/null && echo "  ✓ Time Machine local snapshots deleted"
-      # Unified system log database (~2-3 GB, rebuilt automatically by logd)
-      sudo -n log erase --all 2>/dev/null && echo "  ✓ Unified log database erased"
+      if [[ "$_OS" = macos ]]; then
+          sudo -n dscacheutil -flushcache 2>/dev/null && sudo -n killall -HUP mDNSResponder 2>/dev/null && echo "  ✓ DNS cache flushed"
+          sudo -n atsutil databases -remove 2>/dev/null && echo "  ✓ Font cache removed"
+          osascript -e 'tell application "Finder" to empty trash' 2>/dev/null && echo "  ✓ Trash emptied"
+          sudo -n rm -rf /private/var/log/asl/*.asl 2>/dev/null && echo "  ✓ ASL system logs removed"
+          sudo -n tmutil deletelocalsnapshots / 2>/dev/null && echo "  ✓ Time Machine local snapshots deleted"
+          sudo -n log erase --all 2>/dev/null && echo "  ✓ Unified log database erased"
+      else
+          sudo -n systemd-resolve --flush-caches 2>/dev/null && echo "  ✓ DNS cache flushed"
+          fc-cache -f 2>/dev/null && echo "  ✓ Font cache rebuilt"
+          rm -rf "$HOME/.local/share/Trash" 2>/dev/null && echo "  ✓ Trash emptied"
+          sudo -n journalctl --vacuum-time=7d 2>/dev/null && echo "  ✓ journal logs vacuumed"
+      fi
     } >"$_o" 2>&1 &
     _pids+=($!)
   fi
