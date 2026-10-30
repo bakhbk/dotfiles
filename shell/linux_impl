@@ -30,3 +30,4 @@ _pkg_install() {
     elif _has zypper; then sudo zypper install -y "$@"
     else echo "no package manager found" >&2; return 1; fi
 }
+_dns_servers() { awk '/nameserver/{print $2; exit}' /etc/resolv.conf 2>/dev/null; }

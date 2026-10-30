@@ -599,132 +599,103 @@ fs() {
 }
 
 
-netcheck() {
-    local -a targets=("$@")
-    [ ${#targets[@]} -eq 0 ] && targets=(8.8.8.8 1.1.1.1 yandex.ru baidu.com google.co.jp google.de)
-    local timeout=2
-    
-    echo "🔍 Проверка сети"
-    echo "======================="
-    
-    # Локальная сеть
-    echo ""
-    echo "📡 Локальная сеть:"
-    
-    # Локальный IP
-    local my_ip
-    my_ip=$(_local_ip)
-    echo "   🖥️  Твой IP: $my_ip"
-    
-    # Публичный IP
-    local pub_ip="n/a"
-    pub_ip=$(curl -s --max-time 2 --fail https://ifconfig.me 2>/dev/null || curl -s --max-time 2 --fail https://icanhazip.com 2>/dev/null || echo 'n/a')
-    [[ -z "$pub_ip" ]] && pub_ip='n/a'
-    [ "$pub_ip" != "n/a" ] && echo "   🌐 Публичный IP: $pub_ip" || echo "   🌐 Публичный IP: не определяется"
-    
-    # HTTP проверка
-    local http_ok=false
-    echo ""
-    echo "🌍 HTTP доступ:"
-    for url in https://yandex.ru https://google.com; do
-        _code=$(curl -s --max-time 3 -o /dev/null -w "%{http_code}" "$url" 2>/dev/null)
-        case "$_code" in
-            200|301|302)
-                echo "   ✅ $url → $_code"
-                http_ok=true
-                ;;
-            *)
-                echo "   ❌ $url → ${_code:-timeout}"
-                ;;
-        esac
-    done
-    
-    # Роутер/шлюз
-    local gw
-    gw=$(_gateway)
-    if [ -n "$gw" ] && [ "$gw" != "(default)" ]; then
-        echo "   📶 Роутер: $gw"
-        if timeout $timeout ping -c 1 "$gw" &>/dev/null; then
-            echo "   ✅ Роутер доступен"
-        else
-            echo "   ❌ Роутер не отвечает — проверь Wi-Fi/кабель"
-        fi
+_resolve() {
+    local host=$1 srv=${2:-}
+    if _has dig; then
+        dig -t A "$host" ${srv:+@$srv} +short 2>/dev/null
+    elif _has nslookup; then
+        nslookup "$host" ${srv:-} 2>/dev/null | awk '/[Aa]ddress:/{print $NF}'
     else
-        echo "   ❌ Шлюз не найден — нет подключения к сети"
-    fi
-    
-    # Внешние хосты
-    echo ""
-    echo "🌐 DNS и Ping:"
-    
-    local count=0 passed=0 failed=0 dns_ok=false ping_ip=false dns_refused=false
-    for t in "${targets[@]}"; do
-        count=$((count + 1))
-        echo "[$count/${#targets[@]}] $t..."
-        
-        if [[ "$t" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            if timeout $timeout ping -c 1 "$t" 2>&1 | grep -q "Destination.*Unreachable"; then
-                echo "   ❌ Destination Unreachable — роутер не пушит наружу"
-                failed=$((failed + 1))
-            elif timeout $timeout ping -c 1 "$t" 2>&1 | grep -q "100% packet loss\|Request timeout"; then
-                echo "   ❌ FAIL (${timeout}s)"
-                failed=$((failed + 1))
-            elif timeout $timeout ping -c 1 "$t" &>/dev/null; then
-                echo "   ✅ OK"
-                passed=$((passed + 1))
-                ping_ip=true
-            else
-                echo "   ❌ FAIL (${timeout}s)"
-                failed=$((failed + 1))
-            fi
-        else
-            local ip=""
-            if timeout $timeout nslookup "$t" 2>&1 | grep -q "REFUSED"; then
-                dns_refused=true
-                echo "   ❌ DNS REFUSED — роутер отказывает"
-                failed=$((failed + 1))
-            elif timeout $timeout nslookup "$t" 2>&1 | grep -q "server can't find\|NXDOMAIN"; then
-                echo "   ❌ DNS FAIL (${timeout}s)"
-                failed=$((failed + 1))
-            elif timeout $timeout nslookup "$t" &>/dev/null; then
-                ip=$(nslookup "$t" 2>/dev/null | grep "Address:" | tail -1 | awk '{print $2}')
-                dns_ok=true
-                if timeout $timeout ping -c 1 "$t" &>/dev/null; then
-                    echo "   ✅ OK → $ip"
-                    passed=$((passed + 1))
-                else
-                    echo "   ⚠️  TIMEOUT (${timeout}s)"
-                    failed=$((failed + 1))
-                fi
-            else
-                echo "   ❌ DNS FAIL (${timeout}s)"
-                failed=$((failed + 1))
-            fi
-        fi
-    done
-    
-    # Итог
-    echo ""
-    echo "======================="
-    if [ $passed -eq $count ] && [ "$http_ok" = true ]; then
-        echo "✅ интернет работает"
-    elif [ $dns_refused = true ] && [ $http_ok = false ]; then
-        echo "❌ Нет интернета — роутер не подключён к сети (проблема у провайдера)"
-    elif [ $dns_ok = false ] && [ $ping_ip = true ]; then
-        echo "⚠️  DNS не работает — проверь настройки DNS"
-    elif [ $ping_ip = false ] && [ $dns_ok = true ]; then
-        echo "⚠️  Нет доступа наружу — проверь фаервол/прокси"
-    elif [ $failed -eq $count ]; then
-        if [ -z "$gw" ] || [ "$gw" = "(default)" ]; then
-            echo "❌ Нет сети — проверь Wi-Fi/кабель"
-        else
-            echo "❌ Нет интернета — проблема у провайдера"
-        fi
-    else
-        echo "⚠️  Частичное подключение — некоторые серверы не доступны"
+        getent hosts "$host" 2>/dev/null | awk '{print $1}'
     fi
 }
 
+_ping() {
+    local host=$1 to=${2:-2} out rc
+    out=$(ping -c 1 -W "$to" "$host" 2>&1)
+    rc=$?
+    ((rc == 0)) && [[ $out != *'100% packet loss'* ]]
+}
+
+_net_probe() {
+    local t=$1 to=$2 ip
+    if [[ $t =~ '^[0-9.]+$' ]]; then
+        _ping "$t" "$to" && echo "   ✅ $t OK" || echo "   ⚠️  $t — ICMP заблокирован"
+    else
+        ip=$(_resolve "$t" | head -1)
+        [[ -z $ip ]] && { echo "   ❌ $t — DNS FAIL"; return; }
+        _ping "$ip" "$to" && echo "   ✅ $t → $ip" || echo "   ⚠️  $t → $ip — ICMP заблокирован"
+    fi
+}
+
+netcheck() {
+    local -a targets=("$@")
+    ((${#targets[@]})) || targets=(8.8.8.8 1.1.1.1 google.com yandex.ru)
+    local to=2 gw ifc dns pub code url out ok=0 warn=0 fail=0 http_ok=false
+    gw=$(_gateway)
+    ifc=$(_iface)
+    dns=$(_dns_servers)
+    pub=$(curl -sL --max-time 3 ifconfig.me 2>/dev/null)
+    [[ -z $pub ]] && pub=$(curl -sL --max-time 3 icanhazip.com 2>/dev/null)
+
+    echo "🔍 Проверка сети"
+    echo "======================="
+    echo "📡 Локальная сеть:"
+    echo "   🖥️  IP: $(_local_ip)  интерфейс: ${ifc:-?}"
+    echo "   🌐 Публичный IP: ${pub:-не определяется}"
+    echo "   📶 Шлюз: ${gw:-не найден}"
+    echo "   🧪 DNS: ${dns:-не настроен}"
+
+    echo ""
+    echo "🌍 HTTP доступ:"
+    for url in https://google.com https://yandex.ru; do
+        code=$(curl -sL -o /dev/null --max-time 4 -w '%{http_code}' "$url")
+        if [[ $code =~ '^[23]' ]]; then
+            echo "   ✅ $url → $code"
+            http_ok=true
+        else
+            echo "   ❌ $url → ${code:-timeout}"
+        fi
+    done
+
+    echo ""
+    echo "🌐 DNS и Ping:"
+    for t in "${targets[@]}"; do
+        out=$(_net_probe "$t" "$to")
+        echo "$out"
+        case $out in
+            *✅*) ok=$((ok + 1)) ;;
+            *⚠️*) warn=$((warn + 1)) ;;
+            *) fail=$((fail + 1)) ;;
+        esac
+    done
+
+    echo ""
+    echo "======================="
+    if [[ -z $gw ]]; then
+        echo "❌ нет сети — шлюз не найден (Wi-Fi/кабель)"
+    elif [[ $http_ok == true && $fail == 0 ]]; then
+        echo "✅ интернет работает"
+    elif [[ $http_ok == true ]]; then
+        echo "✅ интернет работает, недоступно: ${fail} из ${#targets[@]}"
+    elif ! _ping "$gw" "$to"; then
+        echo "❌ роутер не отвечает — проверь подключение"
+    elif [[ -z $(_resolve google.com) && -n $(_resolve google.com 8.8.8.8) ]]; then
+        echo "⚠️  системный DNS (${dns:-none}) молчит, прямой резолвер работает"
+        [[ $ifc =~ 'utun|tun' ]] && echo "   причина: VPN-туннель ($ifc) — переподключи или выключи VPN"
+        if [[ $(uname -s) == Darwin ]]; then
+            echo "   фикс: sudo networksetup -setdnsservers Wi-Fi 8.8.8.8 1.1.1.1"
+        else
+            echo "   фикс: sudo systemctl restart resolvconf  (или DNS в настройках VPN)"
+        fi
+    elif [[ $fail == 0 && $warn == ${#targets[@]} ]]; then
+        echo "⚠️  DNS работает, ping к внешним хостам блокируется — проверь фаервол"
+    elif _ping 8.8.8.8 "$to"; then
+        echo "⚠️  частичное подключение — часть серверов недоступна"
+    else
+        echo "❌ нет доступа наружу — проблема на уровне роутера/провайдера"
+    fi
+}
 
 # Agent Runner Selector
 # Usage: gar [-e|-d|-r "task"|-h]

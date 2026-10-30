@@ -14,5 +14,6 @@ _unlock_file() { sudo chflags nouchg "$1"; }
 _cache_dir()   { echo "$HOME/Library/Caches"; }
 _adb_path()    { echo "$HOME/Library/Android/sdk/platform-tools/adb"; }
 _net_ifaces()  { ifconfig -a 2>/dev/null | awk '/^[a-z][a-z0-9]*:/{print $1}'; }
+_dns_servers() { scutil --dns 2>/dev/null | awk '/nameserver\[0\]/{print $3; exit}'; }
 _list_ports()  { lsof -iTCP -sTCP:LISTEN -P -n; }
 _pkg_install() { brew install "$@"; }

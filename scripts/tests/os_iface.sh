@@ -9,7 +9,7 @@ source "$DIR/zsh_compat"
 
 typeset -a fns=(
   _clip_copy _clip_paste _local_ip _iface _gateway _open_file
-  _lock_file _unlock_file _cache_dir _adb_path _net_ifaces _list_ports _pkg_install
+  _lock_file _unlock_file _cache_dir _adb_path _net_ifaces _list_ports _pkg_install _dns_servers
 )
 
 fail=0

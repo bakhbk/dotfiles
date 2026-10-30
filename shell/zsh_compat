@@ -45,6 +45,7 @@ _unlock_file() { return 1; }
 _cache_dir()  { echo "$CACHE_ROOT"; }
 _adb_path()   { echo ''; }
 _net_ifaces() { echo ''; }
+_dns_servers() { echo ''; }
 _list_ports() { lsof -iTCP -sTCP:LISTEN -P -n; }
 _pkg_install() { echo "no package manager on $_OS" >&2; return 1; }
 
