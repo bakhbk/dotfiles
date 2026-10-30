@@ -4,7 +4,7 @@
 
 # Create a new directory and enter it
 mkcd() {
-    mkdir -pv "$1" && cd "$1"
+    command mkdir -pv "$1" && cd "$1"
 }
 
 
@@ -93,18 +93,11 @@ docker-clean() {
     docker images | grep none | awk '{print $3}' | xargs docker rmi
 }
 
-if [[ "$OSTYPE" = linux* ]]; then
+if [[ "$_OS" = linux ]]; then
 
 # macOS-like convenient open
 open () {
-    if [ -f "$1" ]; then
-        case "$1" in
-            *.html)  firefox "$1" 2>/dev/null             ;;
-            *)       echo "'$1' cannot process with open" ;;
-        esac
-    else
-        echo "'$1' is not a valid file"
-    fi
+    _open_file "$@"
 }
 
 fi
@@ -353,7 +346,7 @@ dedirs() {
 }
 
 # Define the path to adb
-ADB_PATH="/Users/$(whoami)/Library/Android/sdk/platform-tools/adb"
+ADB_PATH="$(_adb_path)"
 
 
 # Check if adb is already available (either in PATH or as an alias)
@@ -425,7 +418,7 @@ gitdo() {
     done                                                                                                
     # копирование через файл — надёжно, без пайп-буферов                                                
     if [ -n "$COPY_FILE" ]; then                                                                        
-        pbcopy < "$COPY_FILE"; rm -f "$COPY_FILE"                                                         
+        _clip_copy < "$COPY_FILE"; rm -f "$COPY_FILE"                                                         
         echo "✓ скопировано в буфер" >&2                                                                  
     fi                                                                                                  
 }   
@@ -592,10 +585,10 @@ fs() {
         local editor="${EDITOR:-nvim}"
         $editor "$f"
     else
-        if   command -v pbcopy >/dev/null 2>&1; then pbcopy  < "$f"
-        elif command -v wl-copy >/dev/null 2>&1; then wl-copy < "$f"
-        elif command -v xclip >/dev/null 2>&1;   then xclip -selection clipboard < "$f"
-        else echo "No clipboard tool found" >&2; return 1
+        if _clip_copy < "$f"; then
+            echo "✓ contents copied to clipboard"
+        else
+            echo "No clipboard tool found" >&2; return 1
         fi
         echo "✓ contents copied to clipboard"
     fi
@@ -616,21 +609,12 @@ netcheck() {
     
     # Локальный IP
     local my_ip
-    if [[ "$OSTYPE" = darwin* ]]; then
-        local _iface=$(route get default 2>/dev/null | awk '/interface:/ {print $2}')
-        my_ip=$(ipconfig getifaddr "$_iface" 2>/dev/null || echo 'n/a')
-    else
-        my_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'n/a')
-    fi
+    my_ip=$(_local_ip)
     echo "   🖥️  Твой IP: $my_ip"
     
     # Публичный IP
     local pub_ip="n/a"
-    if [[ "$OSTYPE" = darwin* ]]; then
-        pub_ip=$(curl -s --max-time 2 --fail https://ifconfig.me 2>/dev/null || curl -s --max-time 2 --fail https://icanhazip.com 2>/dev/null || echo 'n/a')
-    else
-        pub_ip=$(curl -s --max-time 2 --fail https://ifconfig.me 2>/dev/null || echo 'n/a')
-    fi
+    pub_ip=$(curl -s --max-time 2 --fail https://ifconfig.me 2>/dev/null || curl -s --max-time 2 --fail https://icanhazip.com 2>/dev/null || echo 'n/a')
     [ "$pub_ip" != "n/a" ] && echo "   🌐 Публичный IP: $pub_ip" || echo "   🌐 Публичный IP: не определяется"
     
     # HTTP проверка
@@ -652,11 +636,7 @@ netcheck() {
     
     # Роутер/шлюз
     local gw
-    if [[ "$OSTYPE" = darwin* ]]; then
-        gw=$(route get default 2>/dev/null | awk '/gateway: / {print $2}')
-    else
-        gw=$(ip route 2>/dev/null | grep default | awk '{print $3}' | head -1)
-    fi
+    gw=$(_gateway)
     if [ -n "$gw" ] && [ "$gw" != "(default)" ]; then
         echo "   📶 Роутер: $gw"
         if timeout $timeout ping -c 1 "$gw" &>/dev/null; then
@@ -882,13 +862,7 @@ print(template, end='')
         echo "$rendered" > "$tmp_file"
         local editor="${EDITOR:-nvim}"
         $editor "$tmp_file"
-        if command -v pbcopy >/dev/null 2>&1; then
-            cat "$tmp_file" | pbcopy
-        elif command -v wl-copy >/dev/null 2>&1; then
-            cat "$tmp_file" | wl-copy
-        else
-            cat "$tmp_file" | xclip -selection clipboard
-        fi
+        _clip_copy < "$tmp_file"
         rm -f "$tmp_file"
         echo "✓ Rendered SKILL.md for $agent copied to clipboard"
 
@@ -898,12 +872,8 @@ print(template, end='')
 
     else
         # default: copy to clipboard
-        if command -v pbcopy >/dev/null 2>&1; then
-            echo "$rendered" | pbcopy
-        elif command -v wl-copy >/dev/null 2>&1; then
-            echo "$rendered" | wl-copy
-        else
-            echo "$rendered" | xclip -selection clipboard
+        if ! echo "$rendered" | _clip_copy; then
+            echo "$rendered"
         fi
         echo "✓ Rendered SKILL.md for $agent copied to clipboard"
     fi

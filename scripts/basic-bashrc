@@ -62,7 +62,7 @@ fi
 alias p="ps aux"
 alias mem="free -h 2>/dev/null || free"
 alias disk="df -h 2>/dev/null || df"
-alias myip="ip addr show 2>/dev/null | grep -oP \"(?<=inet\\s)\\d+(\\.\\d+){3}\" | grep -v \"127.0.0.1\" | head -1"
+alias myip="ip -4 -br addr 2>/dev/null | sed -n 's|.* \\([0-9]*\\.[0-9]*\\.[0-9]*\\.[0-9]*\\)/.*|\\1|p' | grep -v '^127\\.' | head -1"
 
 # 6. QUICK COMMANDS
 alias hi="history | tail -20"
