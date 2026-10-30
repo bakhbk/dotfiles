@@ -71,6 +71,7 @@ alias reload-bash='source ~/.bashrc'
 alias reload-zsh='source ~/.zshrc'
 alias rmr='rm -rf'
 alias show-path='echo $PATH | tr -s ":" "\n"'
+alias ports='_list_ports'
 
 # ADB Helpers
 alias ads='adb devices'
@@ -117,7 +118,6 @@ if [[ "$_OS" = linux ]]; then
     alias lscpu='lscpu -e'
     alias meminfo='free -h -l'
     alias mount='sudo mount | column -t'
-    alias ports='_list_ports'
     alias poweroff='sudo poweroff'
     alias routes='ip -c -br route show'
     alias reboot='sudo reboot'
