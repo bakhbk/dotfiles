@@ -5,7 +5,7 @@ set -u
 
 DIR="${1:-$HOME/.dotfiles}"
 export DOTFILES_DIR="$DIR"
-source "$DIR/zsh_compat.zsh"
+source "$DIR/zsh_compat"
 
 typeset -a fns=(
   _clip_copy _clip_paste _local_ip _iface _gateway _open_file

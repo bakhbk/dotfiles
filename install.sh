@@ -89,9 +89,9 @@ mkdir -p "$HOME/.dotfiles"
 ./installers/install_clipboard_helpers.sh || true
 
 CONFIGS=(
-  shell/zsh_compat.zsh
-  shell/macos_impl.zsh
-  shell/linux_impl.zsh
+  shell/zsh_compat
+  shell/macos_impl
+  shell/linux_impl
   shell/bash_tools
   shell/zsh_aliases
   shell/zsh_tools

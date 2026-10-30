@@ -1,6 +1,10 @@
 # Purprose:
 # Aliases for zsh.
 # For a full list of active aliases, run `alias`.
+# Load the OS adapter before anything else (idempotent)
+[[ -z "${_COMPAT_LOADED:-}" ]] && for _c in "$HOME/.dotfiles/zsh_compat" "$HOME/dotfiles/shell/zsh_compat"; do
+    [[ -f "$_c" ]] && source "$_c" && break
+done
 # Global aliases
 alias -g G='|grep'
 alias -g M='|more'

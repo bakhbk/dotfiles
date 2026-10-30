@@ -1,5 +1,9 @@
-# Purprose:
+# Purpose:
 # Handy zsh commands and functions.
+[[ -z "${_COMPAT_LOADED:-}" ]] && for _c in "$HOME/.dotfiles/zsh_compat" "$HOME/dotfiles/shell/zsh_compat"; do
+    [[ -f "$_c" ]] && source "$_c" && break
+done
+
 
 
 # Create a new directory and enter it

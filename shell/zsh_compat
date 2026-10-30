@@ -51,5 +51,5 @@ _pkg_install() { echo "no package manager on $_OS" >&2; return 1; }
 [[ -f "$HOME/.dotfiles/dotfiles.env" ]] && source "$HOME/.dotfiles/dotfiles.env"
 typeset -ga _compat_dirs=("$HOME/.dotfiles" "${DOTFILES_DIR:-}" "${DOTFILES_DIR:-$HOME/dotfiles}/shell" "$HOME/dotfiles/shell" "$HOME/.zsh")
 for _compat_dir in "${_compat_dirs[@]}"; do
-    [[ -n "$_compat_dir" && -f "$_compat_dir/${_OS}_impl.zsh" ]] && { source "$_compat_dir/${_OS}_impl.zsh"; break; }
+    [[ -n "$_compat_dir" && -f "$_compat_dir/${_OS}_impl" ]] && { source "$_compat_dir/${_OS}_impl"; break; }
 done
