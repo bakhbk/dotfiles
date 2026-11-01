@@ -1,0 +1,11 @@
+# Ghostty config (dotfiles/ghostty/config) -> ~/.config/ghostty/config
+# Только keys, подтверждённые в исходниках src/config/Config.zig.
+
+# --- Clipboard: OSC 52 (tmux -> системный буфер, работает через SSH) ---
+clipboard-write = allow
+clipboard-read = allow
+
+# --- Мышь: tmux ловит клики; Shift = ручное выделение мимо tmux ---
+mouse-reporting = true
+mouse-shift-capture = false
+mouse-hide-while-typing = true

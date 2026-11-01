@@ -1,0 +1,117 @@
+# Purprose:
+# zsh configuration.
+
+# Don't beep on errors
+setopt No_Beep
+
+# History parameters
+# It is recommended to keep SAVEHIST == HISTSIZE
+HISTSIZE=10000
+SAVEHIST=10000
+HISTFILE=~/.dotfiles/.zsh_history
+
+# Each line is added to the history as it is executed
+setopt INC_APPEND_HISTORY
+
+# Removes copies of lines still in the history list
+setopt HIST_IGNORE_ALL_DUPS
+
+# Drop empty strings from history
+setopt HIST_REDUCE_BLANKS
+
+# Remove no needed spaces (e.g. trailing)
+setopt HIST_IGNORE_SPACE
+
+# Expand PATH
+typeset -U path
+
+path=()
+path+=(~/.local/bin)
+
+if [[ "${OSTYPE}" = darwin* ]]; then
+    path+=("${HOMEBREW_PREFIX}/bin")
+    path+=("${HOMEBREW_PREFIX}/opt/coreutils/libexec/gnubin")
+    path+=("${HOMEBREW_PREFIX}/opt/gnu-tar/libexec/gnubin")
+    path+=("${HOMEBREW_PREFIX}/opt/openjdk/bin")
+    path+=("${HOMEBREW_PREFIX}/opt/unzip/bin")
+    path+=("${HOMEBREW_PREFIX}/opt/ruby/bin")
+fi
+
+path+=(/usr/local/bin)
+path+=(/usr/local/sbin)
+path+=(/usr/bin)
+path+=(/bin)
+path+=(/usr/sbin)
+path+=(/sbin)
+
+# Load scripts (пропускаем отсутствующие, чтобы не ронять .zshrc)
+for f in zsh_compat zsh_aliases zsh_tools gw agent-runner.sh zshenv create_tmux_session.sh \
+         commit.sh fvm_tools.sh ollama_fzf.sh clean.sh charset_fix.sh project_clean.sh; do
+    [ -f ~/.dotfiles/$f ] && source ~/.dotfiles/$f
+done
+if [ -f ~/work/.zshrc ]; then
+  source ~/work/.zshrc
+fi
+
+# Tramp client (Emacs) sets TERM to dumb.
+# It doesn't expect anything clever or beautiful if cmdline prompt.
+if [[ $TERM == "dumb" ]]; then
+    unsetopt zle
+    PS1='$ '
+    return
+fi
+
+export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+export PATH="$HOME/fvm/default/bin:$PATH"
+export PATH="$HOME/fvm/bin:$PATH"
+export PATH="$PATH":"$HOME/.pub-cache/bin"
+
+if [[ $USE_OH_MY_ZSH == "true" ]]; then
+    # echo 'USE_OH_MY_ZSH user ' $USE_OH_MY_ZSH
+else 
+    # echo 'USE_OH_MY_ZSH NOT used ' $USE_OH_MY_ZSH
+    source ~/.dotfiles/shell_prompt
+fi
+
+# fzf is a general-purpose command-line fuzzy finder.
+# https://github.com/junegunn/fzf
+[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh && source <(fzf --zsh)
+
+[ -f ~/.zshenv ] && source ~/.zshenv
+
+if command -v pyenv >/dev/null; then
+    export PYENV_ROOT="$HOME/.pyenv"
+    PATH="$PYENV_ROOT/bin:$PATH"
+    eval "$(pyenv init --path)"
+fi
+
+if command -v git >/dev/null; then
+    git config --global core.editor "vim"
+fi
+
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"                   # This loads nvm
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion" # This loads nvm bash_completion
+
+export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+export PATH="$HOME/fvm/default/bin:$PATH"
+export PATH="$HOME/fvm/bin:$PATH"
+export PATH="$PATH":"$HOME/.pub-cache/bin"
+
+if command -v go >/dev/null; then
+    export PATH="$PATH:$(go env GOPATH)/bin"
+fi
+
+if [[ "${OSTYPE}" = linux* ]]; then
+    # If Homebrew exists in the standard Linuxbrew location, use it.
+    if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
+        eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+    # Otherwise, if `brew` is on PATH, use that.
+    elif command -v brew >/dev/null 2>&1; then
+        eval "$(brew shellenv)"
+    fi
+fi
+
+if command -v zoxide &> /dev/null; then
+    eval "$(zoxide init zsh)"
+fi

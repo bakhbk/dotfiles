@@ -1,0 +1,58 @@
+# gw — git worktree helper (simple version)
+#
+#   gw add <name> [branch]  →  git worktree add ../<name> -b [branch|feature/<name>]
+#                              (dir prefix: GW_DIR, branch prefix: GW_BRANCH)
+#   gw go <path>            →  cd <path> (as given, no prefix)
+#   gw <anything else>      →  git worktree <anything else>   (pure proxy, verbatim)
+#   gw -v ... | GW_DEBUG=1  →  trace (set -x)
+#
+# Examples:
+#   gw add cbc-1                        ../cbc-1 @ feature/cbc-1
+#   gw add cbc-1 hotfix/cbc-1           ../cbc-1 @ hotfix/cbc-1
+#   gw list
+#   gw remove -f ../cbc-1               (full git syntax: 'remove', not 'rm')
+#   gw go ../cbc-1
+
+gw() {
+  if [[ ${GW_DEBUG:-} == 1 || $1 == -v || $1 == --verbose ]]; then
+    set -x
+    [[ $1 == -v || $1 == --verbose ]] && shift
+  fi
+
+  local cmd=${1:-h}
+  [[ $# -gt 0 ]] && shift
+
+  case $cmd in
+    h|-h|--help)
+      cat <<EOF
+usage: gw add <name> [branch]   create \${GW_DIR:-../}<name> @ [branch|feature/<name>]
+       gw go <path>             cd into <path> (as given)
+       gw <cmd> [args]          proxy → git worktree <cmd> [args]   (list/remove/prune/lock/...)
+       gw -v ...                debug trace
+
+  env:  GW_DIR=../  GW_BRANCH=feature/  GW_DEBUG=1
+
+  ---------------------------------------------------------------------
+
+EOF
+      git worktree -h ;;
+    a|add)
+      local name=$1
+      local branch=${2:-${GW_BRANCH:-feature/}${name}}
+      git worktree add "${GW_DIR:-../}${name}" -b "$branch" "${@:3}" || return
+      print -u2 "ok: ${GW_DIR:-../}${name} @ ${branch}"
+      ;;
+    rm)
+      local _f=() _n=()
+      for x in "$@"; do [[ $x == -* ]] && _f+=($x) || _n+=($x); done
+      local args=(${_f[@]})
+      for n in ${_n[@]}; do
+        [[ $n == (/?|./?*|../?*) ]] && args+=($n) || args+=("${GW_DIR:-../}${n}")
+      done
+      git worktree remove ${args[@]} ;;
+    go)
+      cd "$1" || return 1 ;;
+    *)
+      git worktree $cmd $@ ;;
+  esac
+}

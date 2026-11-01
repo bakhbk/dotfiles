@@ -1,0 +1,97 @@
+# Collect terminal colors to use later (e.g. in PROMPT)
+autoload -U colors && colors
+
+# Allow to enter inside directory just using its name
+setopt autocd
+
+# Completition by Tab
+autoload -Uz compinit
+compinit
+
+# When completing from the middle of the word,
+# move the cursor to the end of the word
+setopt always_to_end
+
+# Spelling correction for commands
+setopt correct
+
+# Make sure that the terminal is in application mode when zle is active, since
+# only then values from $terminfo are valid
+if (( ${+terminfo[smkx]} )) && (( ${+terminfo[rmkx]} )); then
+    function zle-line-init()
+    {
+        echoti smkx
+    }
+
+    function zle-line-finish()
+    {
+        echoti rmkx
+    }
+
+    zle -N zle-line-init
+    zle -N zle-line-finish
+fi
+
+# Search in the commands history using arrow keys
+if [[ "${terminfo[kcuu1]}" != "" ]]; then
+    autoload -U up-line-or-beginning-search
+    zle -N up-line-or-beginning-search
+    bindkey "${terminfo[kcuu1]}" up-line-or-beginning-search
+fi
+
+if [[ "${terminfo[kcud1]}" != "" ]]; then
+    autoload -U down-line-or-beginning-search
+    zle -N down-line-or-beginning-search
+    bindkey "${terminfo[kcud1]}" down-line-or-beginning-search
+fi
+
+# Enable bash-like incremental search
+bindkey '^R' history-incremental-search-backward
+
+# allow ctrl-a to move to the beginning of a line
+bindkey '^a' beginning-of-line
+
+# allow ctrl-e to move to the end of a line
+bindkey '^e' end-of-line
+
+# Mark ssh connection in cmdline prompt
+if [ -n "${SSH_CLIENT}" ]; then
+    text="ssh"
+fi
+
+# Enable prompt update on directory change
+setopt prompt_subst
+
+# Returns "*" if the current git branch is dirty.
+function parse_git_dirty {
+  [[ $(git diff --shortstat 2> /dev/null | tail -n1) != "" ]] && echo "*"
+}
+
+# Returns "|stashed:N" where N is the number of stashed states (if any)
+function parse_git_stash {
+  local stash=`expr $(git stash list 2>/dev/null| wc -l)`
+
+  if [ "${stash}" != "0" ]; then
+    echo "|stashed:${stash}"
+  fi
+}
+
+# Print git info
+# Taken from:
+# http://0xfe.blogspot.ru/2010/04/adding-git-status-information-to-your.html
+git-prompt()
+{
+    local ref=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+
+    if [ "${ref}" = "HEAD" ]; then
+        ref="detached"
+    fi
+
+    if [ "${ref}" != "" ]; then
+        echo "(${ref}$(parse_git_dirty)$(parse_git_stash)) "
+    fi
+}
+
+# Format prompt
+newline=$'\n'
+PROMPT='%{$fg[blue]%}%2d%{$reset_color%} %{$fg[red]%}$(git-prompt)%{$reset_color%}%{$fg[yellow]%}%(1j.%j.)%{$reset_color%} $text${newline}> '

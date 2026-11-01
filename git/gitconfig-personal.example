@@ -1,0 +1,5 @@
+# Шаблон: cp git/gitconfig-personal.example ~/.gitconfig-personal
+# и заполнить своими значениями (не коммитить реальные данные).
+[user]
+	name = YOUR_NAME
+	email = you@example.com

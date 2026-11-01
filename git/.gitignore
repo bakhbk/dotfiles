@@ -1,0 +1,6 @@
+# IDEs
+/.vscode/
+
+# Golang workspaces
+go.work
+go.work.sum

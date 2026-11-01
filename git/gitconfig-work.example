@@ -1,0 +1,4 @@
+# Шаблон: cp git/gitconfig-work.example ~/.gitconfig-work
+[user]
+	name = YOUR_WORK_NAME
+	email = you@company.example

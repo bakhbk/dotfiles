@@ -1,0 +1,869 @@
+# Purpose:
+# Handy zsh commands and functions.
+[[ -z "${_COMPAT_LOADED:-}" ]] && for _c in "$HOME/.dotfiles/zsh_compat" "$HOME/dotfiles/shell/zsh_compat"; do
+    [[ -f "$_c" ]] && source "$_c" && break
+done
+
+
+
+# Create a new directory and enter it
+mkcd() {
+    command mkdir -pv "$1" && cd "$1"
+}
+
+
+# Colored man pages
+man()
+{
+    env \
+    LESS_TERMCAP_mb=$(printf "\e[1;36m") \
+    LESS_TERMCAP_md=$(printf "\e[1;36m") \
+    LESS_TERMCAP_me=$(printf "\e[0m") \
+    LESS_TERMCAP_se=$(printf "\e[0m") \
+    LESS_TERMCAP_so=$(printf "\e[1;44;33m") \
+    LESS_TERMCAP_ue=$(printf "\e[0m") \
+    LESS_TERMCAP_us=$(printf "\e[1;32m") \
+    man "$@"
+}
+
+
+# Extracts archived files / mounts disk images
+# Usage: extract <file>
+# Credit: http://nparikh.org/notes/zshrc.txt
+extract () {
+    if [ -f $1 ]; then
+        case $1 in
+            *.tar.bz2)  tar -jxvf $1                        ;;
+            *.tar.gz)   tar -zxvf $1                        ;;
+            *.bz2)      bunzip2 $1                          ;;
+            *.dmg)      hdiutil mount $1                    ;;
+            *.gz)       gunzip $1                           ;;
+            *.tar)      tar -xvf $1                         ;;
+            *.tbz2)     tar -jxvf $1                        ;;
+            *.tgz)      tar -zxvf $1                        ;;
+            *.zip)      unzip $1                            ;;
+            *.ZIP)      unzip $1                            ;;
+            *.pax)      cat $1 | pax -r                     ;;
+            *.pax.Z)    uncompress $1 --stdout | pax -r     ;;
+            *.Z)        uncompress $1                       ;;
+            *)          echo "'$1' cannot be extracted/mounted via extract()" ;;
+        esac
+    else
+        echo "'$1' is not a valid file"
+    fi
+}
+
+
+# Generate new SSH key
+# Usage: sshcreate <key_name>
+sshcreate() {
+    if [ ! -z "$1" ];
+    then
+        ssh-keygen -f $HOME/.ssh/$1 -t ed25519 -N '' -C "$1"
+        chmod 600 $HOME/.ssh/$1
+        chmod 600 $HOME/.ssh/$1.pub
+    fi
+}
+
+# Get short info and hints about a command
+wtfis() {
+    curl "https://cheat.sh/$1"
+}
+
+
+# Get full list of ports opened in firewalld for registered services
+fports() {
+    for i in `sudo firewall-cmd --list-services`;
+    do
+        echo "\n$i:"
+        sudo firewall-cmd --permanent --service "$i" --get-ports;
+    done
+}
+
+# Create git branch from origin branch with the same name
+gcob() {
+    git checkout -b $1 origin/$1
+}
+
+# Cleans py[cod] and cache dirs in the current tree
+pyclean () {
+    find . \
+        | grep -E "(__pycache__|\.(mypy_)?cache|\.hypothesis\.py[cod]$)" \
+        | xargs rm -rf
+}
+
+# Clean intermediate Docker images names as none
+docker-clean() {
+    docker images | grep none | awk '{print $3}' | xargs docker rmi
+}
+
+if [[ "$_OS" = linux ]]; then
+
+# macOS-like convenient open
+open () {
+    _open_file "$@"
+}
+
+fi
+
+# Clean any flutter project
+fclean() {
+  # Find all directories containing a pubspec.yaml file
+  find . -name "pubspec.yaml" -exec dirname {} \; | while read -r dir; do
+    # Construct the path to the build directory
+    build_dir="$dir/build"
+
+    # Check if the build directory exists
+    if [ -d "$build_dir" ]; then
+      echo "Removing build directory in $dir"
+      rm -rf "$build_dir"
+    fi
+  done
+}
+
+# Clean node_modules on react project
+rclean () {
+  # Find all directories containing a package.json file
+  find . -name "package.json" -exec dirname {} \; | while read -r dir; do
+    # Construct the path to the node_modules directory
+    node_modules_dir="$dir/node_modules"
+
+    # Check if the node_modules directory exists
+    if [ -d "$node_modules_dir" ]; then
+      echo "Removing node_modules directory in $dir"
+      rm -rf "$node_modules_dir"
+    fi
+  done
+}
+
+# Clean temporary files in various project types
+clean_temp() {
+  # Safety check
+  if [[ "$PWD" == "/" ]]; then
+    echo "ERROR: Cannot run clean_temp from root directory"
+    return 1
+  fi
+
+  echo "=== Starting cleanup in $PWD ==="
+
+  # Stash any uncommitted changes in git repos to preserve work
+  echo "=== Stashing git changes ==="
+  find . -name ".git" -type d | while read -r gitdir; do
+    dir=$(dirname "$gitdir")
+    (cd "$dir" && git diff-index --quiet HEAD || (git add . && git stash))
+  done
+
+  # Dart/Flutter projects
+  echo "=== Cleaning Dart/Flutter projects ==="
+  find . -name "pubspec.yaml" -exec dirname {} \; | while read -r dir; do
+    echo "Cleaning: $dir"
+    cd "$dir"
+    rm -rf .dart_tool build ios/build ios/Pods ios/Podfile.lock ios/.symlinks android/build android/.gradle
+    if command -v flutter &> /dev/null; then
+      flutter clean
+    elif command -v dart &> /dev/null; then
+      dart clean
+    fi
+    cd - > /dev/null
+  done
+
+  # Node.js/React projects
+  echo "=== Cleaning Node.js/React projects ==="
+  find . -name "package.json" -exec dirname {} \; | while read -r dir; do
+    if [ -d "$dir/node_modules" ]; then
+      echo "Removing: $dir/node_modules"
+      rm -rf "$dir/node_modules"
+    fi
+    # Additional web temp dirs
+    rm -rf "$dir/__sapper__" "$dir/.next" "$dir/.nuxt" "$dir/logs"
+  done
+
+  # PHP projects
+  echo "=== Cleaning PHP projects ==="
+  find . -name "composer.json" -exec dirname {} \; | while read -r dir; do
+    if [ -d "$dir/vendor" ]; then
+      echo "Removing: $dir/vendor"
+      rm -rf "$dir/vendor"
+    fi
+    # Symfony/Laravel cache and logs (dynamic search)
+    find "$dir" -type d \( -path "*/var/cache" -o -path "*/var/log" \) 2>/dev/null | while read -r cachedir; do
+      echo "Removing: $cachedir"
+      rm -rf "$cachedir"
+    done
+  done
+
+  # Go projects
+  echo "=== Cleaning Go projects ==="
+  find . -name "go.mod" -exec dirname {} \; | while read -r dir; do
+    echo "Cleaning: $dir"
+    (cd "$dir" && go clean -cache -modcache ./...)
+  done
+
+  # Go module cache (global)
+  if [ -d "pkg/mod" ]; then
+    echo "Removing Go module cache"
+    rm -rf pkg/mod
+  fi
+
+  # Rust projects
+  find . -name "Cargo.toml" -exec dirname {} \; | while read -r dir; do
+    echo "Cleaning Rust project in $dir"
+    (cd "$dir" && cargo clean)
+  done
+
+  # Gradle/Java/Android projects
+  find . -name "build.gradle" -o -name "build.gradle.kts" -exec dirname {} \; | while read -r dir; do
+    if [ -d "$dir/build" ]; then
+      echo "Removing build in $dir"
+      rm -rf "$dir/build"
+    fi
+    # Additional Gradle temp dirs
+    rm -rf "$dir/.gradle" "$dir/.idea" "$dir/.kotlin"
+  done
+
+  # Maven/Java projects
+  find . -name "pom.xml" -exec dirname {} \; | while read -r dir; do
+    if [ -d "$dir/target" ]; then
+      echo "Removing target in $dir"
+      rm -rf "$dir/target"
+    fi
+  done
+
+  # Python projects
+  find . -name "pyproject.toml" -o -name "setup.py" -exec dirname {} \; | while read -r dir; do
+    echo "Cleaning Python project in $dir"
+    rm -rf "$dir/__pycache__" "$dir/dist" "$dir/build"
+  done
+
+  # .NET projects
+  find . -name "*.csproj" -exec dirname {} \; | while read -r dir; do
+    echo "Cleaning .NET project in $dir"
+    rm -rf "$dir/bin" "$dir/obj"
+  done
+
+  # Ruby projects
+  find . -name "Gemfile" -exec dirname {} \; | while read -r dir; do
+    echo "Cleaning Ruby project in $dir"
+    rm -rf "$dir/vendor/bundle" "$dir/.bundle"
+  done
+
+  # Elixir projects
+  find . -name "mix.exs" -exec dirname {} \; | while read -r dir; do
+    echo "Cleaning Elixir project in $dir"
+    (cd "$dir" && mix clean)
+  done
+
+  # Cleanup Xcode artifacts
+  find . -type d \( -name "DerivedData" -o -name "*.xcarchive" \) -exec rm -rf {} + 2>/dev/null
+
+  # Cleanup general cache and temp files
+  find . -type f -name ".DS_Store" -delete 2>/dev/null
+
+  # Reset git repos to clean state
+  echo "=== Resetting git repos ==="
+  find . -name ".git" -type d | while read -r gitdir; do
+    dir=$(dirname "$gitdir")
+    (cd "$dir" && git diff-index --quiet HEAD || git reset --hard)
+  done
+
+  echo "=== Cleanup complete ==="
+}
+
+# ==========================
+# = Show all aliases start =  
+# ==========================
+_aliases="$(alias -Lr 2>/dev/null || alias)"
+
+alias_for() {
+  local alias_name="$1"
+  [[ -z "$alias_name" ]] && return 1
+
+  local found="$(echo "$_aliases" | sed -nE "/^alias\ ${alias_name}='?(.+)/s//\\1/p" )"
+  [[ -n "$found" ]] && echo "${found%\'}" || echo "Alias not found: $alias_name"
+}
+
+
+# Evaluate all the aliases
+# example
+# ```
+# shas | grep -E "^alias g"
+# ```
+shas(){
+  alias -Lr 2>/dev/null || alias
+  # Убираем ANSI escape-последовательности из вывода функций
+  functions | grep '^[a-zA-Z0-9_]\+ ()' | cut -d' ' -f1 | sed $'s/\e\[[0-9;]*[a-zA-Z]//g'
+}
+
+alias dfvv="shas | fzf"
+
+function dfv() {
+    if [ -z "$1" ]; then
+        echo "Usage: dfv <pattern>"
+        return 1
+    fi
+    local LIST
+    LIST="$(shas  2>/dev/null || echo "")
+        $(wtfis "$1" 2>/dev/null || echo "")"
+    echo "$LIST" | grep -E "$1"
+}
+
+_showFlutterAliases () {
+    shas "alias ([d|f]|dart|flutter)"
+}
+
+alias fli="_showFlutterAliases"
+# ==========================
+# = Show all aliases end   =  
+# ==========================
+
+
+# Password generator
+pwgen() {
+  local len=${1:-20}
+  LC_ALL=C tr -dc 'A-Za-z0-9@#%^&*()_+=-{}[]:;<>,.?/' < /dev/urandom | head -c "$len" | xargs echo
+}
+
+# Password generator without escaping symbols
+pwgens() {
+  local len=${1:-20}
+  LC_ALL=C tr -dc 'A-Za-z0-9@#%_+=-' < /dev/urandom | head -c "$len" | xargs echo
+}
+
+# Delete empty directories recursively from current directory
+# Usage: dedirs [--dry-run]
+dedirs() {
+    local DRY_RUN=false
+
+    if [[ "$1" == "--dry-run" ]]; then
+        DRY_RUN=true
+        echo "Dry run mode - showing directories that would be removed:"
+    fi
+
+    # Find all empty directories and either show or delete them
+    if $DRY_RUN; then
+        find . -type d -empty -print
+    else
+        echo "Removing empty directories..."
+        find . -type d -empty -delete
+        echo "Done."
+    fi
+}
+
+# Define the path to adb
+ADB_PATH="$(_adb_path)"
+
+
+# Check if adb is already available (either in PATH or as an alias)
+if command -v adb &> /dev/null; then
+  #  echo "ADB is already available."
+else
+    # Check if adb exists at the specified path
+    if [ -f "$ADB_PATH" ]; then
+        # Create an alias for adb
+        alias adb="$ADB_PATH"
+        export PATH=$PATH:$ANDROID_HOME/platform-tools
+    fi
+fi
+
+gido() {
+    find . -name .git -type d -prune | while read -r gitdir; do
+
+        repo_dir=$(dirname "$gitdir" | sed 's|^\./||')
+        if [ "$repo_dir" = "." ]; then
+            repo_dir="Корневая папка"
+        fi
+
+
+        echo -e "\n\033[1;34m📦 Репозиторий: \033[1;33m$repo_dir\033[0m"
+
+
+        (cd "$(dirname "$gitdir")" && eval "$@")
+    done
+    echo ""
+}
+
+function gi() {
+  curl -sLw '\n' https://www.toptal.com/developers/gitignore/api/$@
+}
+
+gitdo() {                                                                                            
+    echo "in $(pwd)" >&2                                                                                
+                                                                                                        
+    # gitdo "..." | pbcopy  →  копирование через временный файл (надёжно)                               
+    local COPY_FILE=""                                                                                  
+    [[ -t 3 ]] && COPY_FILE=$(mktemp)                                                                   
+    exec 3</dev/null                                                                                    
+                                                                                                        
+    find . -name .git -type d -prune | while read -r gitdir; do                                         
+        repo_dir=$(dirname "$gitdir" | sed 's|^\./||')
+        [ "$repo_dir" = "." ] && continue
+                                                                                                        
+        branch=$(git -C "$(dirname "$gitdir")" branch --show-current 2>/dev/null)                         
+                                                                     
+        if [ -n "$COPY_FILE" ]; then               
+            out=$(cd "$(dirname "$gitdir")" && eval "$@" | sed $'s/\x1b\[[0-9;]*m//g')
+        else                          
+            out=$(cd "$(dirname "$gitdir")" && eval "$@") 
+        fi
+                                                      
+        if [ -z "$out" ]; then                                                                            
+        echo "· $repo_dir${branch:+ ($branch)} — без изменений\n\n" >&2                                 
+        else                                                                                              
+        echo "\033[2m┌─ $repo_dir${branch:+ ($branch)}\033[0m\n" >&2                                    
+        if [ -n "$COPY_FILE" ]; then               
+            out=$(cd "$(dirname "$gitdir")" && eval "$@" | sed $'s/\x1b\[[0-9;]*m//g')
+            printf '%s\n' "$out" >> "$COPY_FILE"                                                          
+        else                          
+            out=$(cd "$(dirname "$gitdir")" && eval "$@") 
+            printf '%s\n' "$out"                                                                          
+        fi                                                                                              
+        echo "\033[2m└──────────────────────────────\033[0m\n\n" >&2                                    
+        fi                                                                                                
+    done                                                                                                
+    # копирование через файл — надёжно, без пайп-буферов                                                
+    if [ -n "$COPY_FILE" ]; then                                                                        
+        _clip_copy < "$COPY_FILE"; rm -f "$COPY_FILE"                                                         
+        echo "✓ скопировано в буфер" >&2                                                                  
+    fi                                                                                                  
+}   
+
+# AI Agent runner
+# Usage: aigent [-s "system prompt"] "task"
+aigent() {
+    local custom_system_prompt=""
+    local task_args=()
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -s|--system-prompt)
+                if [ $# -lt 2 ]; then
+                    echo "Error: $1 requires an argument"
+                    return 1
+                fi
+                custom_system_prompt="$2"
+                shift 2
+                ;;
+            *)
+                task_args+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    if [ ${#task_args[@]} -eq 0 ]; then
+        echo "Usage: aigent [-s \"system prompt\"] \"task\""
+        return 1
+    fi
+
+    local conf="$HOME/.config/dispatch/providers.conf"
+    if [ ! -f "$conf" ]; then
+        echo "Error: $conf not found"
+        return 1
+    fi
+    local url key model
+    url=$(awk '/\[Gateway\]/{f=1} f&&/^url=/{sub(/^url=/,""); print; exit}' "$conf")
+    key=$(awk '/\[Gateway\]/{f=1} f&&/^key=/{sub(/^key=/,""); print; exit}' "$conf")
+    model=$(awk '/\[Gateway\]/{f=1} f&&/^last_model=/{sub(/^last_model=/,""); sub(/\.gguf$/,"",$0); sub(/-Q[0-9]*_K.*/,""); print; exit}' "$conf")
+    if [ -z "$url" ] || [ -z "$key" ]; then
+        echo "Error: url/key not found in $conf"
+        return 1
+    fi
+    (export LLM_BASE_URL="$url" LLM_API_KEY="$key" LLM_MODEL="$model"
+     cd ~/dotfiles/scripts || return 1
+     if [ -n "$custom_system_prompt" ]; then
+         uv run ./aigent.py -s "$custom_system_prompt" "${task_args[@]}"
+     else
+         uv run ./aigent.py "${task_args[@]}"
+     fi)
+}
+
+# KR Jarvis AI Agent
+# Usage: krbot [-s "system prompt"] "task"
+krbot() {
+    local custom_system_prompt=""
+    local task_args=()
+
+    # Parse flags: -s/--system-prompt takes one argument, everything else is task
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -s|--system-prompt)
+                if [ $# -lt 2 ]; then
+                    echo "Error: $1 requires an argument"
+                    return 1
+                fi
+                custom_system_prompt="$2"
+                shift 2
+                ;;
+            *)
+                task_args+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    if [ ${#task_args[@]} -eq 0 ]; then
+        echo "Usage: krbot [-s \"system prompt\"] \"task\""
+        return 1
+    fi
+
+    local conf="$HOME/.config/dispatch/providers.conf"
+    local script_dir="$HOME/dotfiles/scripts"
+    if [ ! -f "$conf" ]; then
+        echo "Error: $conf not found"
+        return 1
+    fi
+    local url key model
+    url=$(awk '/\[kr-jarvis\]/{f=1} f&&/^url=/{sub(/^url=/,""); print; exit}' "$conf")
+    key=$(awk '/\[kr-jarvis\]/{f=1} f&&/^key=/{sub(/^key=/,""); print; exit}' "$conf")
+    model=$(awk '/\[kr-jarvis\]/{f=1} f&&/^last_model=/{sub(/^last_model=/,""); sub(/\.gguf$/,"",$0); sub(/-Q[0-9]*_K.*/,""); print; exit}' "$conf")
+    if [ -z "$url" ] || [ -z "$key" ]; then
+        echo "Error: url/key not found in $conf"
+        return 1
+    fi
+    (export LLM_BASE_URL="$url" LLM_API_KEY="$key" LLM_MODEL="$model"
+     cd "$script_dir" || return 1
+     if [ -n "$custom_system_prompt" ]; then
+         uv run ./aigent.py -s "$custom_system_prompt" "${task_args[@]}"
+     else
+         uv run ./aigent.py "${task_args[@]}"
+     fi)
+}
+
+
+# Show project tree with gitignore-aware filtering
+# Usage: t [dir] [depth] [tree flags...]   (defaults: . 2)
+#   --all  : show gitignored files too
+#   extra flags (e.g. -h, -C, -d) are passed through to tree
+t() {
+  local dir="${1:-.}"
+  local depth="${2:-2}"
+  local gitignore="--gitignore"
+  local -a extra=()
+
+  (( $# >= 2 )) && shift 2
+  (( $# >= 1 )) && shift
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --all) gitignore=""; shift ;;
+      *)     extra+=("$1"); shift ;;
+    esac
+  done
+
+  tree "$dir" -L "$depth" $gitignore \
+    -I "node_modules|dist|build|__pycache__|\.venv|\.next|\.cache|coverage|\.git|\.DS_Store|vendor|target|Pods|\.gradle" \
+    -F "${extra[@]}"
+}
+
+
+# Select a file via fzf (preview: first 75 lines, truncated to 250 chars), print its path,
+# and copy its CONTENTS to the system clipboard (pbcopy/wl-copy/xclip).
+# Usage: fs [-e] [dir-or-glob]   (default: ~/.agents/prompts)
+#   -e  : open selected file in $EDITOR instead of copying to clipboard
+fs() {
+    local edit_mode=false
+    local dir="$HOME/.agents/prompts"
+    while getopts ":e" opt; do
+        case $opt in
+            e) edit_mode=true ;;
+            *) echo "Usage: fs [-e] [dir-or-glob]"; return 1 ;;
+        esac
+    done
+    shift $((OPTIND - 1))
+    [ $# -gt 0 ] && dir="$1"
+
+    local qdir="${(q)dir}"
+    # change:reload(...): every typed character triggers a content search via
+    # grep over files in this directory (the official fzf 0.7x pattern).
+    # ${(q)dir} -- shell-safe quoting; \\{} -- escape плейсхолдера fzf.
+    # No -maxdepth: recursive find for nested directory structures.
+    local _reloader="{ find $qdir -type f -iname \"*\$FZF_QUERY*\"; find $qdir -type f -exec grep -il -- \"\$FZF_QUERY\" \\{} +; } 2>/dev/null | sort -u"
+    f=$(find "$dir" -type f \
+        | fzf --disabled \
+               --bind "change:reload(${_reloader})" \
+               --preview-window=wrap --preview 'head -75 {} | cut -c1-250') || return
+    [ -z "$f" ] && return
+    echo "$f"
+
+    if $edit_mode; then
+        local editor="${EDITOR:-nvim}"
+        $editor "$f"
+    else
+        if _clip_copy < "$f"; then
+            echo "✓ contents copied to clipboard"
+        else
+            echo "No clipboard tool found" >&2; return 1
+        fi
+        echo "✓ contents copied to clipboard"
+    fi
+}
+
+
+_resolve() {
+    local host=$1 srv=${2:-}
+    if _has dig; then
+        dig -t A "$host" ${srv:+@$srv} +short 2>/dev/null
+    elif _has nslookup; then
+        nslookup "$host" ${srv:-} 2>/dev/null | awk '/[Aa]ddress:/{print $NF}'
+    else
+        getent hosts "$host" 2>/dev/null | awk '{print $1}'
+    fi
+}
+
+_ping() {
+    local host=$1 to=${2:-2} out rc
+    out=$(ping -c 1 -W "$to" "$host" 2>&1)
+    rc=$?
+    ((rc == 0)) && [[ $out != *'100% packet loss'* ]]
+}
+
+_net_probe() {
+    local t=$1 to=$2 ip
+    if [[ $t =~ '^[0-9.]+$' ]]; then
+        _ping "$t" "$to" && echo "   ✅ $t OK" || echo "   ⚠️  $t — ICMP заблокирован"
+    else
+        ip=$(_resolve "$t" | head -1)
+        [[ -z $ip ]] && { echo "   ❌ $t — DNS FAIL"; return; }
+        _ping "$ip" "$to" && echo "   ✅ $t → $ip" || echo "   ⚠️  $t → $ip — ICMP заблокирован"
+    fi
+}
+
+netcheck() {
+    local -a targets=("$@")
+    ((${#targets[@]})) || targets=(8.8.8.8 1.1.1.1 google.com yandex.ru)
+    local to=2 gw ifc dns pub code url out ok=0 warn=0 fail=0 http_ok=false
+    gw=$(_gateway)
+    ifc=$(_iface)
+    dns=$(_dns_servers)
+    pub=$(curl -sL --max-time 3 ifconfig.me 2>/dev/null)
+    [[ -z $pub ]] && pub=$(curl -sL --max-time 3 icanhazip.com 2>/dev/null)
+
+    echo "🔍 Проверка сети"
+    echo "======================="
+    echo "📡 Локальная сеть:"
+    echo "   🖥️  IP: $(_local_ip)  интерфейс: ${ifc:-?}"
+    echo "   🌐 Публичный IP: ${pub:-не определяется}"
+    echo "   📶 Шлюз: ${gw:-не найден}"
+    echo "   🧪 DNS: ${dns:-не настроен}"
+
+    echo ""
+    echo "🌍 HTTP доступ:"
+    for url in https://google.com https://yandex.ru; do
+        code=$(curl -sL -o /dev/null --max-time 4 -w '%{http_code}' "$url")
+        if [[ $code =~ '^[23]' ]]; then
+            echo "   ✅ $url → $code"
+            http_ok=true
+        else
+            echo "   ❌ $url → ${code:-timeout}"
+        fi
+    done
+
+    echo ""
+    echo "🌐 DNS и Ping:"
+    for t in "${targets[@]}"; do
+        out=$(_net_probe "$t" "$to")
+        echo "$out"
+        case $out in
+            *✅*) ok=$((ok + 1)) ;;
+            *⚠️*) warn=$((warn + 1)) ;;
+            *) fail=$((fail + 1)) ;;
+        esac
+    done
+
+    echo ""
+    echo "======================="
+    if [[ -z $gw ]]; then
+        echo "❌ нет сети — шлюз не найден (Wi-Fi/кабель)"
+    elif [[ $http_ok == true && $fail == 0 ]]; then
+        echo "✅ интернет работает"
+    elif [[ $http_ok == true ]]; then
+        echo "✅ интернет работает, недоступно: ${fail} из ${#targets[@]}"
+    elif ! _ping "$gw" "$to"; then
+        echo "❌ роутер не отвечает — проверь подключение"
+    elif [[ -z $(_resolve google.com) && -n $(_resolve google.com 8.8.8.8) ]]; then
+        echo "⚠️  системный DNS (${dns:-none}) молчит, прямой резолвер работает"
+        [[ $ifc =~ 'utun|tun' ]] && echo "   причина: VPN-туннель ($ifc) — переподключи или выключи VPN"
+        if [[ $(uname -s) == Darwin ]]; then
+            echo "   фикс: sudo networksetup -setdnsservers Wi-Fi 8.8.8.8 1.1.1.1"
+        else
+            echo "   фикс: sudo systemctl restart resolvconf  (или DNS в настройках VPN)"
+        fi
+    elif [[ $fail == 0 && $warn == ${#targets[@]} ]]; then
+        echo "⚠️  DNS работает, ping к внешним хостам блокируется — проверь фаервол"
+    elif _ping 8.8.8.8 "$to"; then
+        echo "⚠️  частичное подключение — часть серверов недоступна"
+    else
+        echo "❌ нет доступа наружу — проблема на уровне роутера/провайдера"
+    fi
+}
+
+# Agent Runner Selector
+# Usage: gar [-e|-d|-r "task"|-h]
+#   -e, --edit      : open rendered SKILL.md in $EDITOR, then copy to clipboard
+#   -d, --dry-run   : show rendered SKILL.md in terminal (no clipboard)
+#   -r, --run "task": render + pass directly to pi with task
+#   -h, --help      : show this help message
+#   default         : render and copy to clipboard
+# Find and run command on all matching files (e.g. frn pubspec.yaml "fcl;fpg")
+frn() {
+  local ROOT="${ROOT_DIR:-.}"
+  [ -n "$1" ] && [ -n "$2" ] || {
+    echo "❌ frn <file> <cmd>"
+    echo "   ROOT_DIR=/path frn <file> \"<cmd1>;<cmd2>;...\""
+    return 1
+  }
+  [ ! -d "$ROOT" ] && exit 1
+  find "$ROOT" -name "$1" -type f | grep -vE '/(example|\.symlinks|build|\.dart_tool)/' \
+    | sort | while read -r p; do
+      local d
+      d="$(dirname "$p")"
+      echo "📦 $(cd "$d" && pwd)" && (cd "$d" && eval "$2" 2>&1) && echo "   ✅" || echo "   ❌"
+    done; echo "✅ Done"
+}
+
+gar() {
+    local config_file="$HOME/.config/agent-runner/config.json"
+    local edit_mode=false
+    local run_mode=false
+    local dry_run_mode=false
+    local help_mode=false
+    local task=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -e|--edit)   edit_mode=true; shift ;;
+            -d|--dry-run) dry_run_mode=true; shift ;;
+            -r|--run)    run_mode=true; shift; task="$*"; break ;;
+            -h|--help)   help_mode=true; shift ;;
+            *)           shift ;;
+        esac
+    done
+
+    # Show help if requested
+    if $help_mode; then
+        echo "Usage: gar [-e|-d|-r \"task\"]"
+        echo ""
+        echo "Options:"
+        echo "  -e, --edit      Open rendered SKILL.md in \$EDITOR, then copy to clipboard"
+        echo "  -d, --dry-run   Show rendered SKILL.md in terminal (no clipboard)"
+        echo "  -r, --run \"task\" Render and pass directly to pi with task"
+        echo "  -h, --help      Show this help message"
+        echo ""
+        echo 'Config: ~/.config/agent-runner/config.json'
+        echo '  {'
+        echo '    "agents": {'
+        echo '      "<name>": {'
+        echo '        "invocation": "...",'
+        echo '        # optional:'
+        echo '        "system_prompt_flag": "...",'
+        echo '        "prompt_prefix": "..."'
+        echo '      }'
+        echo '    }'
+        echo '  }'
+        echo ''
+        echo "Default: render and copy to clipboard"
+        return 0
+    fi
+
+    # Check config exists
+    if [ ! -f "$config_file" ]; then
+        echo "❌ Config not found: $config_file" >&2
+        return 1
+    fi
+
+    # Select agent via fzf with preview
+    local agent
+    agent=$(jq -r '.agents | keys[]' "$config_file" 2>/dev/null | \
+            fzf --preview-window=wrap --preview "jq '.agents[\"{}\"]' $config_file" 2>/dev/null) || return
+
+    [ -z "$agent" ] && return
+    echo "✓ Selected agent: $agent"
+
+    # Read config values
+    local invocation system_prompt_flag prompt_prefix
+    invocation=$(jq -r ".agents[\"$agent\"].invocation" "$config_file")
+    system_prompt_flag=$(jq -r ".agents[\"$agent\"].system_prompt_flag // empty" "$config_file")
+    prompt_prefix=$(jq -r ".agents[\"$agent\"].prompt_prefix" "$config_file")
+
+    # Generate UUID once per invocation
+    local uuid
+    uuid=$(uuidgen | cut -c1-8)
+
+    # Auto-create session directory
+    mkdir -p "$HOME/.cache/agent-runner/$uuid"
+
+    # Clean old prompt directories (>7 days)
+    find "$HOME/.cache/agent-runner" -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + 2>/dev/null
+
+    # Render SKILL.md template using python3
+    local rendered
+    if [ -z "$system_prompt_flag" ]; then
+        # No system prompt flag — remove System Prompt Control section
+        rendered=$(python3 -c "
+import re
+template = open('$HOME/.agents/skills/agent-runner/SKILL.md').read()
+template = re.sub(r'## System Prompt Control\n.*?(?=## Rules)', '', template, flags=re.DOTALL)
+template = template.replace('{{AGENT_NAME}}', '$agent')
+template = template.replace('{{INVOCATION}}', '''$invocation''')
+template = template.replace('{{PROMPT_PREFIX}}', '$prompt_prefix')
+template = template.replace('{{SESSION_UUID}}', '$uuid')
+print(template, end='')
+")
+    else
+        rendered=$(python3 -c "
+template = open('$HOME/.agents/skills/agent-runner/SKILL.md').read()
+template = template.replace('{{AGENT_NAME}}', '$agent')
+template = template.replace('{{INVOCATION}}', '''$invocation''')
+template = template.replace('{{SYSTEM_PROMPT_FLAG}}', '$system_prompt_flag')
+template = template.replace('{{PROMPT_PREFIX}}', '$prompt_prefix')
+template = template.replace('{{SESSION_UUID}}', '$uuid')
+print(template, end='')
+")
+    fi
+
+    if $run_mode; then
+        # --run: create temp file and pass to pi
+        local tmp_file
+        tmp_file=$(mktemp /tmp/skill-XXXXXX.md)
+        echo "$rendered" > "$tmp_file"
+        echo "🚀 Running agent $agent with task: $task"
+        pi --skill "$tmp_file" -p "$task"
+        rm -f "$tmp_file"
+
+    elif $edit_mode; then
+        # --edit: open in editor, then copy to clipboard
+        local tmp_file
+        tmp_file=$(mktemp /tmp/skill-XXXXXX.md)
+        echo "$rendered" > "$tmp_file"
+        local editor="${EDITOR:-nvim}"
+        $editor "$tmp_file"
+        _clip_copy < "$tmp_file"
+        rm -f "$tmp_file"
+        echo "✓ Rendered SKILL.md for $agent copied to clipboard"
+
+    elif $dry_run_mode; then
+        # --dry-run: show in terminal
+        echo "$rendered"
+
+    else
+        # default: copy to clipboard
+        if ! echo "$rendered" | _clip_copy; then
+            echo "$rendered"
+        fi
+        echo "✓ Rendered SKILL.md for $agent copied to clipboard"
+    fi
+}
+
+# Install APK on a selected device
+# Usage: apk <path-to-apk>
+apk() {
+    local apk_file=${1:?"Usage: apk <path-to-apk>"}
+    [ -f "$apk_file" ] || { echo "no file: $apk_file"; return 1; }
+
+    local serial
+    serial=$(adb devices | awk 'NR>1 && $2=="device" {print $1}' | fzf --height 20% --reverse --header "Устройство: ")
+    [ -n "$serial" ] || return 1
+
+    adb -s "$serial" install -r "$apk_file"
+}

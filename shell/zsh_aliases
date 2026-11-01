@@ -1,0 +1,292 @@
+# Purprose:
+# Aliases for zsh.
+# For a full list of active aliases, run `alias`.
+# Load the OS adapter before anything else (idempotent)
+[[ -z "${_COMPAT_LOADED:-}" ]] && for _c in "$HOME/.dotfiles/zsh_compat" "$HOME/dotfiles/shell/zsh_compat"; do
+    [[ -f "$_c" ]] && source "$_c" && break
+done
+# Global aliases
+alias -g G='|grep'
+alias -g M='|more'
+alias -g N='2>/dev/null'
+alias -g J='-H "Content-Type: application/json"'
+alias -g S='-w "\n%{http_code}\n"'
+alias -g L='|less'
+alias -g T10='|tail -10'
+alias -g T20='|tail -20'
+alias -g T50='|tail -50'
+alias -g H10='|head -10'
+alias -g H20='|head -20'
+alias -g H50='|head -50'
+alias -g WC='|wc -l'
+alias -g SORT='|sort'
+alias -g U='|uniq'
+alias -g GI='|grep -i'
+alias -g V='|grep -v'
+alias -g X='|xargs'
+#alias -g P='|python -m json.tool'
+command -v ts >/dev/null 2>&1 && alias -g TIME='|ts'
+command -v fzf >/dev/null 2>&1 && alias -g F='|fzf --preview="cat {}"'
+
+
+# Clipboard + file locking: same names on macOS and Linux
+alias -g CP='|_clip_copy'
+alias -g PP='|_clip_paste'
+alias uch='_lock_file'
+alias nouch='_unlock_file'
+
+# Aliases for applications
+if [[ "$_OS" = macos ]]; then
+    alias mchrome='open -n -a "Google Chrome" --args --user-data-dir="$HOME/.config/.chrome-mog-profile" --disable-web-security'
+else
+    alias mchrome='google-chrome --user-data-dir="$HOME/.config/.chrome-mog-profile" --disable-web-security'
+fi
+
+# Dump all files under a directory (default: current) to the clipboard,
+# excluding junk dirs and masking sensitive values (keys, tokens, passwords, ...).
+# Usage: dumpdir [dir]
+unalias dumpdir 2>/dev/null   # allow reload: drop leftover alias from a previous session
+dumpdir() {
+    local src="${1:-.}" tmp
+    tmp=$(mktemp "${TMPDIR:-/tmp}/dumpdir.XXXXXX")
+    if python3 "${DOTFILES_DIR:-$HOME/dotfiles}/scripts/dumpdir.py" "$src" > "$tmp"; then
+        if _clip_copy < "$tmp"; then
+            echo "✅ $(wc -l < "$tmp" | tr -d ' ') lines copied to clipboard (secrets masked)"
+        else
+            cat "$tmp"
+        fi
+    else
+        echo "❌ dumpdir: failed" >&2
+    fi
+    rm -f "$tmp"
+}
+
+# Tools
+alias df='df -h'
+alias du='du -h'
+alias dush='du -sh -- *(D) N | grep -E "[0-9]*[.,]?[0-9]+[GM]" | sort -rh'
+alias dushh='du -sh -- .*(D) N | grep -E "[0-9]*[.,]?[0-9]+[GM]" | sort -rh'
+alias mkdir='mkdir -pv'
+alias reload-bash='source ~/.bashrc'
+alias reload-zsh='source ~/.zshrc'
+alias rmr='rm -rf'
+alias show-path='echo $PATH | tr -s ":" "\n"'
+alias ports='_list_ports'
+
+# ADB Helpers
+alias ads='adb devices'
+alias adbre='adb kill-server && adb devices'
+alias adbwifi='ID=$(adb devices | awk "{gsub(/\\033\\[[0-9;]*m/,\"\"); if (\$2==\"device\") print \$1}" | fzf --height 20% --reverse --header "Выберите USB устройство:") && [ -n "$ID" ] && adb -s $ID tcpip 5555 && sleep 2 && IP=$(adb -s $ID shell "ip addr show wlan0 | grep \"inet \" " | sed -e "s/.*inet \([^/]*\).*/\1/" | tr -d "[:space:]") && adb connect ${IP}:5555'
+alias adboff='ID=$(adb devices | awk "{gsub(/\\033\\[[0-9;]*m/,\"\"); if (\$1 ~ /:/) print \$1}" | fzf --height 20% --reverse --header "Отключить Wi-Fi устройство:") && [ -n "$ID" ] && adb disconnect $ID || echo "Нет активных Wi-Fi соединений"'
+
+if command -v bat &> /dev/null; then
+    alias cat='bat --theme=Nord --style=plain'
+fi
+
+catt() {
+    if [[ "$1" == *.md ]] && whence -p mdless >/dev/null 2>&1; then
+        mdless "$@"
+    elif whence -p bat >/dev/null 2>&1; then
+        bat --theme=Nord --style=plain "$@"
+    else
+        cat "$@"
+    fi
+}
+
+alias grep='grep --color=always'
+alias mc='LC_ALL=en_US.UTF8 mc'
+
+# Show both local (interface) and public (internet) IPs.
+myip() {
+    local _public
+    _public=$(curl -s --max-time 2 --fail https://ifconfig.me || curl -s --max-time 2 --fail https://icanhazip.com || dig +short myip.opendns.com @resolver1.opendns.com || echo 'n/a')
+    [[ -z "$_public" ]] && _public='n/a'
+    echo "local:  $(_local_ip)"
+    echo "public: $_public"
+}
+
+if [[ "$_OS" = linux ]]; then
+    alias aptget='sudo apt-get'
+    alias aptup='sudo apt-get update && sudo apt-get upgrade'
+    alias dnf='sudo dnf'
+    alias gdb='gdb --silent'
+    alias grep='grep --color=always'
+    alias ipconfig='ifconfig'
+    alias ips='ip -c -br address show'
+    alias ipt-list='iptables -vL --line-numbers'
+    alias ipt-watch='watch -n 2 -d iptables -nvL'
+    alias lscpu='lscpu -e'
+    alias meminfo='free -h -l'
+    alias mount='sudo mount | column -t'
+    alias poweroff='sudo poweroff'
+    alias routes='ip -c -br route show'
+    alias reboot='sudo reboot'
+    alias shutdown='sudo /sbin/shutdown'
+    alias snap='sudo snap'
+    alias systemctl='sudo systemctl'
+    alias tree='tree -h'
+    alias umount='sudo umount'
+    alias update-grub='grub2-mkconfig -o "$(readlink -e /etc/grub2.cfg)"'
+    alias yum='sudo yum'
+fi
+
+# Common aliases
+alias c='clear'
+alias e='exit 0'
+alias emacs='emacs -nw'
+alias hosts='cat /etc/hosts'
+alias ll='ls -GlAhFk --color=auto'
+alias ls='ls -GFA --color=auto'
+alias wget='wget -c'
+if [[ "$_OS" = macos ]]; then
+    alias studio='open -a /Applications/Android\ Studio.app'
+    alias storm='open -a /Applications/WebStorm.app'
+else
+    alias studio='android-studio'
+    alias storm='webstorm'
+fi
+
+# NPM aliases
+alias na='npm audit'
+alias ni='npm install --save'
+alias nid='npm install --save-dev'
+alias npm-reinstall='rm -rf node_modules && npm install'
+alias npm-update='sudo npm install -g npm'
+
+# Jest aliases
+alias ji='node_modules/.bin/jest -i'
+alias jt='node_modules/.bin/jest -t'
+alias jdb='node --inspect-brk node_modules/.bin/jest --runInBand'
+
+# Git aliases
+alias gia='grep ^alias.g ~/.zsh_aliases'
+alias ga='git add'
+alias gaa='git add .'
+alias gam='git am --3way --ignore-space-change'
+alias gb='git branch'
+alias gbd='git branch -D'
+# alias gm='git blame -w -C -C -C'
+alias gc='git commit --signoff'
+alias gco='git checkout'
+alias gca='git commit --amend --date=now'
+alias gcan='git commit --amend --no-edit --date=now'
+alias gcp='git cherry-pick'
+alias gcpx='git cherry-pick -x'
+alias gd='git diff'
+alias gdc='git diff --cached'
+alias gf='git fetch --all'
+alias gl='git pull'
+alias glg='git log --color --graph --oneline --abbrev-commit --decorate --abbrev=8 --date=format-local:"%d-%m-%Y %H:%M:%S" --pretty=format:"%C(cyan)%h %C(yellow)%ad %C(bold green)%d %C(reset)%s <%C(bold blue)%an>"'
+alias glm='git log --no-merges --oneline'
+alias gp='git push'
+alias gpf='git push --force-with-lease'
+alias gpo='git push -u origin'
+alias gr='git rebase -i'
+alias gra='git rebase --abort'
+alias grc='git rebase --continue'
+alias gs='git status -sb'
+alias gst='git stash'
+alias gstl='git stash list'
+alias gstp='git stash pop'
+alias gsts='git stash show -p'
+alias gdn='git --no-pager diff --color=always'
+alias gdcc='git --no-pager diff --cached --color=always'
+alias g_del_loc_b='git branch | grep -v "main" | xargs git branch -D'
+
+# Docker aliases (OrbStack)
+alias dc='docker compose'
+alias dcu='docker compose up'
+alias dcd='docker compose down'
+alias dcb='docker compose build'
+alias dcl='docker compose logs'
+alias dcp='docker compose pull'
+alias dcr='docker compose restart'
+alias dce='docker compose exec'
+
+# Docker aliases
+alias d='docker'
+alias di='docker images'
+alias dps='docker ps'
+alias dpsa='docker ps -a'
+alias drm='docker rm'
+alias drmi='docker rmi'
+alias dstop='docker stop'
+alias dstart='docker start'
+alias drestart='docker restart'
+alias dlogs='docker logs'
+alias dexec='docker exec -it'
+
+# Docker helper: choose running container with fzf and open shell
+docker-shell() {
+    local container shell
+    container=$(docker ps --format '{{.Names}}' | sort | fzf --height 40% --reverse --prompt='Container> ')
+    [[ -z "$container" ]] && return 1
+    echo "Connecting to container: $container"
+
+    shell=$(docker exec "$container" sh -c 'if command -v bash >/dev/null 2>&1; then printf bash; elif command -v ash >/dev/null 2>&1; then printf ash; else printf sh; fi' 2>/dev/null)
+    [[ -z "$shell" ]] && return 1
+
+    if [[ "$shell" == bash ]]; then
+        docker exec -it "$container" sh -lc 'cd && exec bash --rcfile "$HOME/.bashrc" -i'
+    elif [[ "$shell" == ash ]]; then
+        docker exec -it "$container" sh -lc 'cd && export ENV="$HOME/.ashrc" && exec ash -i'
+    else
+        docker exec -it "$container" sh -lc 'cd && export ENV="$HOME/.shrc" && exec sh -i'
+    fi
+}
+alias dsh='docker-shell'
+
+# Show adb commands
+alias adbi="cat ~/.zsh/adb-commands/AdbCommands"
+
+source ~/.dotfiles/git_checkout_branch.sh
+source ~/.dotfiles/git_delete_branch.sh
+source ~/.dotfiles/tmux_session_selector.sh
+source ~/.dotfiles/nvmv.sh
+
+# Aider
+alias aider='aider --no-show-model-warnings --yes'
+alias aider-llama='aider --model ollama/llama3.2:3b'
+
+# Ollama
+alias olist='ollama list'
+alias orun='ollama run llama3.2:3b'
+alias trnsl='uv run ~/dotfiles/scripts/trnsl/trnsl.py'
+
+# Quick prompt editor
+# Quick prompt editor
+pp() { echo "" > /tmp/prompt.md && nvim /tmp/prompt.md && PP="$(cat /tmp/prompt.md)" ; }
+
+# Quick prompt + pi
+ppi() { pp && pi -ne -ns -np --system-prompt "$PP" "$@"; }
+
+# Prep agents — sync models across all AI tools
+# Где лежит репозиторий dotfiles (пишет installers/install_prep.sh)
+if [[ -f ~/.dotfiles/dotfiles.env ]]; then
+    source ~/.dotfiles/dotfiles.env
+fi
+: "${DOTFILES_DIR:=$HOME/dotfiles}"
+
+prep() {
+    local script="$DOTFILES_DIR/scripts/prep-agents/prep-agents.py"
+    if [[ ! -f "$script" ]]; then
+        echo "❌ prep: не найден $script (git pull + ./install.sh)" >&2
+        return 1
+    fi
+    # NB: `command -v` can match an alias (oh-my-zsh sets uv='noglob uv'),
+    # so check the real binary with `whence -p`.
+    if whence -p uv &> /dev/null; then
+        uv run "$script" "$@"
+    elif command -v python3 &> /dev/null; then
+        echo "⚠️  uv не найден — запускаю через python3 (установите: $DOTFILES_DIR/installers/install_uv.sh)" >&2
+        python3 "$script" "$@"
+    else
+        echo "❌ prep: нужны uv или python3" >&2
+        return 1
+    fi
+}
+alias prep-fast='prep --max-context 8000'
+alias prep-code='prep --max-context 16000'
+alias prep-deep='prep --max-context 32000'
+alias prep-big='prep --max-context 64000'
+alias prep-clean='prep --cleanup'

@@ -1,0 +1,11 @@
+[core]
+	editor = vim
+	excludesfile = ~/.gitignore
+
+# Личные/рабочие идентичности не хранятся в публичном репозитории:
+# файлы ~/.gitconfig-personal и ~/.gitconfig-work создаёт install.sh
+# из шаблонов git/gitconfig-*.example (значения остаются локально).
+[includeIf "gitdir:~/projects/**"]
+	path = ~/.gitconfig-personal
+[includeIf "gitdir:~/work/**"]
+	path = ~/.gitconfig-work
