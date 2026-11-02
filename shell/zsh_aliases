@@ -192,6 +192,7 @@ alias gsts='git stash show -p'
 alias gdn='git --no-pager diff --color=always'
 alias gdcc='git --no-pager diff --cached --color=always'
 alias g_del_loc_b='git branch | grep -v "main" | xargs git branch -D'
+alias gwp='gw pick'
 
 # Docker aliases (OrbStack)
 alias dc='docker compose'
