@@ -3,6 +3,7 @@
 #   gw add <name> [branch]  →  git worktree add ../<name> -b [branch|feature/<name>]
 #                              (dir prefix: GW_DIR, branch prefix: GW_BRANCH)
 #   gw go <path>            →  cd <path> (as given, no prefix)
+#   gw pick [query]         →  fzf-select a worktree of the current repo, cd into it
 #   gw <anything else>      →  git worktree <anything else>   (pure proxy, verbatim)
 #   gw -v ... | GW_DEBUG=1  →  trace (set -x)
 #
@@ -27,6 +28,7 @@ gw() {
       cat <<EOF
 usage: gw add <name> [branch]   create \${GW_DIR:-../}<name> @ [branch|feature/<name>]
        gw go <path>             cd into <path> (as given)
+       gw pick [query]          fzf-select a worktree, cd into it (query filters)
        gw <cmd> [args]          proxy → git worktree <cmd> [args]   (list/remove/prune/lock/...)
        gw -v ...                debug trace
 
@@ -52,6 +54,18 @@ EOF
       git worktree remove ${args[@]} ;;
     go)
       cd "$1" || return 1 ;;
+    p|pick)
+      local rows path
+      rows=$(git worktree list --porcelain | awk '
+        /^worktree /{p=substr($0,10)}
+        /^branch /{b=substr($0,8); sub("refs/heads/","",b)}
+        /^detached HEAD/{b="(detached)"}
+        /^$/{if(p){printf "%s\t%s\n",p,b;p="";b=""}}
+        END{if(p)printf "%s\t%s\n",p,b}')
+      [[ -z $rows ]] && { print -u2 "gw: no worktrees for $(git rev-parse --show-toplevel 2>/dev/null || pwd)"; return 1 }
+      path=$(printf '%s\n' "$rows" | fzf --query "${1:-}" | cut -f1)
+      [[ -z $path ]] && return 1
+      cd "$path" ;;
     *)
       git worktree $cmd $@ ;;
   esac
