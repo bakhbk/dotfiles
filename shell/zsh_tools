@@ -556,46 +556,74 @@ t() {
 }
 
 
-# Select a file via fzf (preview: first 75 lines, truncated to 250 chars), print its path,
-# and copy its CONTENTS to the system clipboard (pbcopy/wl-copy/xclip).
-# Usage: fs [-e] [dir-or-glob]   (default: ~/.agents/prompts)
-#   -e  : open selected file in $EDITOR instead of copying to clipboard
+# Select one or more prompt files via fzf (tab/shift-tab) and copy their CONTENTS
+# to the clipboard (pbcopy/wl-copy/xclip) as one combined prompt.
+# Usage: fs [-e] [-s] [dir-or-glob]   (default: ~/.agents/prompts)
+#   -s  : strict single-select (no tab multi-picking)
+#   -e  : open selected file(s) in $EDITOR instead of copying to clipboard
 fs() {
-    local edit_mode=false
+    local edit=0 single=0
     local dir="$HOME/.agents/prompts"
-    while getopts ":e" opt; do
+    while getopts ":es" opt; do
         case $opt in
-            e) edit_mode=true ;;
-            *) echo "Usage: fs [-e] [dir-or-glob]"; return 1 ;;
+            e) edit=1 ;;
+            s) single=1 ;;
+            *) echo "Usage: fs [-e] [-s] [dir-or-glob]"; return 1 ;;
         esac
     done
     shift $((OPTIND - 1))
     [ $# -gt 0 ] && dir="$1"
 
-    local qdir="${(q)dir}"
-    # change:reload(...): every typed character triggers a content search via
-    # grep over files in this directory (the official fzf 0.7x pattern).
-    # ${(q)dir} -- shell-safe quoting; \\{} -- escape плейсхолдера fzf.
-    # No -maxdepth: recursive find for nested directory structures.
-    local _reloader="{ find $qdir -type f -iname \"*\$FZF_QUERY*\"; find $qdir -type f -exec grep -il -- \"\$FZF_QUERY\" \\{} +; } 2>/dev/null | sort -u"
-    f=$(find "$dir" -type f \
-        | fzf --disabled \
-               --bind "change:reload(${_reloader})" \
-               --preview-window=wrap --preview 'head -75 {} | cut -c1-250') || return
-    [ -z "$f" ] && return
-    echo "$f"
+    # Content sits on the same line as the path, so fzf searches it natively.
+    # A change:reload-based search would wipe tab-selected items on every keystroke.
+    local -a opts=(--multi)
+    (( single )) && opts=(--no-multi)
+    local picked
+    picked=$(fzf "${opts[@]}" --delimiter=$'\t' --accept-nth=1 \
+        --preview 'head -75 {1} | cut -c1-250' --preview-window=wrap \
+        < <(_fs_items "$dir"))
+    (( ${#picked} )) || return 1
+    local -a sel=( "${(@f)picked}" )
 
-    if $edit_mode; then
+    local f
+    for f in "${sel[@]}"; do print -r -- "$f"; done
+    if (( ${#sel[@]} > 1 )); then
+        local body=$(_fs_combine "${sel[@]}")
+        print -r -- "→ combined ${#sel[@]} prompts (${sel[@]:t}): $(wc -w <<< "$body") words, ${#body} chars"
+    fi
+
+    if (( edit )); then
         local editor="${EDITOR:-nvim}"
-        $editor "$f"
+        (( ${#sel[@]} == 1 )) && $editor "$sel[1]" && return
+        local tmp=$(mktemp "${TMPDIR:-/tmp}/fs-combined-XXXXXX.md")
+        _fs_combine "${sel[@]}" > "$tmp"
+        $editor "$tmp"
     else
-        if _clip_copy < "$f"; then
-            echo "✓ contents copied to clipboard"
+        if (( ${#sel[@]} == 1 )); then
+            _clip_copy < "$sel[1]" || { echo "No clipboard tool found" >&2; return 1; }
         else
-            echo "No clipboard tool found" >&2; return 1
+            _fs_combine "${sel[@]}" | _clip_copy || { echo "No clipboard tool found" >&2; return 1; }
         fi
         echo "✓ contents copied to clipboard"
     fi
+}
+
+# One line per file: "path<TAB>first 160 chars of content, flattened".
+_fs_items() {
+    local dir="$1" f
+    find "$dir" -type f | sort -u | while read -r f; do
+        printf '%s\t%s\n' "$f" "$(tr '\n\t' '  ' < "$f" | cut -c1-160)"
+    done
+}
+
+# Concatenate prompts in list order, each labelled with its filename.
+_fs_combine() {
+    local f
+    for f in "$@"; do
+        print -r -- "--- ${f##*/} ---"
+        cat "$f"
+        print -r -- ""
+    done
 }
 
 
