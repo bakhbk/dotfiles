@@ -55,7 +55,7 @@ EOF
     go)
       cd "$1" || return 1 ;;
     p|pick)
-      local rows path
+      local rows sel
       rows=$(git worktree list --porcelain | awk '
         /^worktree /{p=substr($0,10)}
         /^branch /{b=substr($0,8); sub("refs/heads/","",b)}
@@ -63,9 +63,9 @@ EOF
         /^$/{if(p){printf "%s\t%s\n",p,b;p="";b=""}}
         END{if(p)printf "%s\t%s\n",p,b}')
       [[ -z $rows ]] && { print -u2 "gw: no worktrees for $(git rev-parse --show-toplevel 2>/dev/null || pwd)"; return 1 }
-      path=$(printf '%s\n' "$rows" | fzf --query "${1:-}" | cut -f1)
-      [[ -z $path ]] && return 1
-      cd "$path" ;;
+      sel=$(printf '%s\n' "$rows" | fzf --query "${1:-}" | cut -f1)
+      [[ -z $sel ]] && return 1
+      cd "$sel" ;;
     *)
       git worktree $cmd $@ ;;
   esac
