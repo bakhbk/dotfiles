@@ -1,3 +1,6 @@
+import re
+
+
 def cluster(values, tol=6.0):
     anchors = []
     for value in sorted(values):
@@ -36,7 +39,8 @@ def cells_from_lines(lines, indices, anchors):
                 current["last"] = line["y0"]
                 current["lines"].append(index)
             else:
-                current = {"col": col, "y0": line["y0"], "y1": line["y1"], "last": line["y0"], "text": line["text"], "lines": [index]}
+                current = {"col": col, "y0": line["y0"], "y1": line["y1"],
+                           "last": line["y0"], "text": line["text"], "lines": [index]}
                 cells.append(current)
     return cells
 
@@ -52,10 +56,14 @@ def rows_from_cells(cells):
 
 
 def markdown_table(rows, ncols):
-    def cells(row):
-        return " | ".join(row["cells"].get(i, {}).get("text", "") for i in range(ncols))
+    used = [c for c in range(ncols) if any(c in row["cells"] for row in rows)]
 
-    lines = [f"| {cells(rows[0])} |", "| " + " | ".join(["---"] * ncols) + " |"]
+    def cells(row):
+        return " | ".join(
+            row["cells"].get(c, {}).get("text", "").replace("|", "\\|") for c in used
+        )
+
+    lines = [f"| {cells(rows[0])} |", "| " + " | ".join(["---"] * len(used)) + " |"]
     lines += [f"| {cells(row)} |" for row in rows[1:]]
     return "\n".join(lines)
 
@@ -72,9 +80,38 @@ def table_from_bbox(lines, bbox, skip):
     return markdown_table(rows, len(anchors)), consumed
 
 
+def table_markdown(table):
+    try:
+        rows = table.extract()
+    except (AttributeError, TypeError, NotImplementedError):
+        return ""
+    rows = [["" if cell is None else re.sub(r"\s+", " ", str(cell)).strip()
+             for cell in row] for row in rows]
+    if len(rows) < 2:
+        return ""
+    used = [i for i in range(len(rows[0])) if any(row[i] for row in rows)]
+    if len(used) < 2:
+        return ""
+
+    def cells(row):
+        return "| " + " | ".join(cell.replace("|", "\\|") for cell in row) + " |"
+
+    header = cells([rows[0][i] for i in used])
+    lines = [header, "| " + " | ".join(["---"] * len(used)) + " |"]
+    lines += [cells([row[i] for i in used]) for row in rows[1:]]
+    return "\n".join(lines)
+
+
 def page_tables(page, lines, skip):
     tables = []
     for table in page.find_tables():
+        indices = region_indices(lines, table.bbox, skip)
+        if len(indices) < 2:
+            continue
+        markdown = table_markdown(table)
+        if markdown:
+            tables.append((markdown, set(indices)))
+            continue
         markdown, consumed = table_from_bbox(lines, table.bbox, skip)
         if markdown:
             tables.append((markdown, consumed))
