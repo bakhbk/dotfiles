@@ -79,11 +79,15 @@ def join_adjacent(units):
     return out
 
 
+PUNCT_RE = re.compile(r"([*_]{1,2})\s+([.,;:!?])")
+
+
 def line_record(unit):
     text = re.sub(r"\s+", " ", " ".join(
         span_style(span["font"], span["text"]) for span in unit["spans"])).strip()
     return {"x0": unit["x0"], "y0": unit["y0"], "y1": unit["y1"],
-           "size": max(span["size"] for span in unit["spans"]), "text": text}
+            "size": max(span["size"] for span in unit["spans"]),
+            "text": PUNCT_RE.sub(r"\1\2", text)}
 
 
 def page_lines(page, drop=()):

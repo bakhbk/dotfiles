@@ -104,3 +104,12 @@ def test_title_not_duplicated_in_body():
     markdown = convert(doc)
     assert markdown.count("Real Report Title") == 1
     assert markdown.startswith("# Real Report Title")
+
+
+def test_punctuation_glued_to_markers():
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((40, 50), "The cost has been", fontsize=10)
+    page.insert_text((120, 50), " 4 EUR", fontsize=10, fontname="Helvetica-Bold")
+    page.insert_text((160, 50), " .", fontsize=10)
+    assert page_lines(page)[0]["text"] == "The cost has been **4 EUR**."
