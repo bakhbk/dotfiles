@@ -99,6 +99,7 @@ CONFIGS=(
   shell/zsh_aliases
   shell/zsh_tools
   shell/gw
+  shell/pi_session.sh
   shell/agent-runner.sh
   shell/zshenv
   shell/.zshrc
