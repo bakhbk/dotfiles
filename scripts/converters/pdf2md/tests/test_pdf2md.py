@@ -71,7 +71,7 @@ def test_repeated_footer_dropped():
     for i in range(4):
         page = doc.new_page()
         page.insert_text((40, 60), f"unique content {i}")
-        page.insert_text((40, 560), "MVPS.net www.mvps.net")
+        page.insert_text((40, 790), "MVPS.net www.mvps.net")
     drop = repeated_texts(doc)
     assert "MVPS.net www.mvps.net" in drop
     assert "MVPS.net" not in convert(doc)

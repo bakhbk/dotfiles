@@ -89,12 +89,13 @@ def render_page(page, number, page_heads, used, page_markers, images, levels, dr
 
 
 def clean_title(doc, drop):
+    lines = page_lines(doc[0])
     title = (doc.metadata.get("title") or "").strip()
-    lines = page_lines(doc[0], drop)
-    first = " ".join(strip_marks(line["text"]) for line in lines[:2])
+    page_text = " ".join(line["text"] for line in lines)
     if (title and not re.search(r"\.(html?|pdf|txt)$", title.lower())
-            and normalize(title)[:20] in normalize(first)):
+            and normalize(title)[:20] in normalize(page_text)):
         return title, set()
+    first = " ".join(strip_marks(line["text"]) for line in page_lines(doc[0], drop)[:2])
     return first or Path(doc.name).stem, {line["text"] for line in lines[:2]}
 
 

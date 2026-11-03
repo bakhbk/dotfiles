@@ -94,18 +94,31 @@ def page_lines(page, drop=()):
     return lines
 
 
+EDGE = 0.15
+
+
+def at_edge(line, page):
+    height = page.rect.height
+    return line["y0"] / height < EDGE or line["y1"] / height > 1 - EDGE
+
+
 def repeated_texts(doc):
-    if doc.page_count < 3:
-        return frozenset()
     counts = {}
+    pages = 0
     for page in doc:
+        lines = page_lines(page)
+        if not lines:
+            continue
+        pages += 1
         seen = set()
-        for line in page_lines(page):
+        for line in lines:
             text = line["text"]
-            if len(text) < MAX_TITLE_LEN and text not in seen:
+            if len(text) < MAX_TITLE_LEN and at_edge(line, page) and text not in seen:
                 seen.add(text)
                 counts[text] = counts.get(text, 0) + 1
-    threshold = max(3, doc.page_count * 0.6)
+    if pages < 3:
+        return frozenset()
+    threshold = max(3, pages * 0.6)
     return frozenset(text for text, count in counts.items() if count >= threshold)
 
 
