@@ -53,3 +53,13 @@ def page_images(doc, out_dir, page_number, rendered):
     if page_number in rendered:
         return render_page(doc, out_dir, page_number)
     return extract_embedded(doc, out_dir, page_number)
+
+
+def gather_images(doc, out_dir, spec):
+    rendered = set(parse_pages(spec, doc.page_count)) if spec else set()
+    images = {}
+    for number in range(1, doc.page_count + 1):
+        found = page_images(doc, out_dir, number, rendered)
+        if found:
+            images[number] = found
+    return images

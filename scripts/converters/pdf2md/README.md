@@ -8,10 +8,13 @@ Structured PDF -> Markdown converter. Output is a folder: `<stem>/<stem>.md` plu
 
 Modules:
 
-- `pdf_lines.py` - layout-aware line extraction, bold/italic, footers, soft hyphens
-- `pdf_outline.py` - heading levels from the PDF bookmark tree
-- `pdf_tables.py` - markdown tables rebuilt from column geometry
+- `pdf_lines.py` - character-level layout extraction: overprinted spans deduped, bold/italic, repeated headers/footers dropped
+- `pdf_outline.py` - heading levels from the bookmark tree, or from font sizes when the PDF has no outline
+- `pdf_tables.py` - markdown tables from pymupdf cells, geometry rebuild as fallback
 - `pdf_images.py` - embedded image extraction and page rendering
 - `pdf2md.py` - entrypoint
 
 Needs: pymupdf (declared in the script metadata, so `uv run` installs it).
+
+    uv run --with pytest --with pymupdf pytest tests
+
