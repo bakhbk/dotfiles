@@ -5,7 +5,7 @@ import pymupdf
 from pdf2md import convert, resolve_output
 from pdf_lines import page_lines, repeated_texts
 from pdf_outline import heading_levels
-from pdf_tables import page_tables, table_from_bbox
+from pdf_tables import markdown_table, page_tables
 
 
 def page_with(spans):
@@ -83,17 +83,13 @@ def test_html_metadata_title_is_not_used():
     assert convert(doc).startswith("# Real Report Title")
 
 
-def test_fallback_escapes_pipes():
-    lines = [
-        {"x0": 40, "y0": 50, "y1": 60, "size": 10, "text": "a|b"},
-        {"x0": 200, "y0": 50, "y1": 60, "size": 10, "text": "c"},
-        {"x0": 40, "y0": 65, "y1": 75, "size": 10, "text": "d"},
-        {"x0": 200, "y0": 65, "y1": 75, "size": 10, "text": "e"},
-        {"x0": 40, "y0": 80, "y1": 90, "size": 10, "text": "f"},
-        {"x0": 200, "y0": 80, "y1": 90, "size": 10, "text": "g"},
-    ]
-    markdown, _ = table_from_bbox(lines, (30, 45, 360, 80), set())
+def test_markdown_escapes_pipes_and_drops_empty_columns():
+    grid = {(0, 0): "a|b", (0, 1): "", (0, 2): "c",
+            (1, 0): "d", (1, 1): "", (1, 2): "e"}
+    markdown = markdown_table(grid, 2, 3)
     assert "\\|" in markdown
+    header = markdown.splitlines()[0]
+    assert header.count("|") - header.count("\\|") == 3
 
 
 def test_two_files_get_two_targets(tmp_path):

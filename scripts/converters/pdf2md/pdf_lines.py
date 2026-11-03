@@ -4,7 +4,9 @@ FOOTER_RE = re.compile(r"^(page \d+ of \d+|version \d+ \()", re.IGNORECASE)
 DOT_LEADER_RE = re.compile(r"\.{3,}")
 MAX_TITLE_LEN = 80
 BASELINE = 2.0
-TOLERANCE = 0.5
+TOLERANCE = 1.2
+MERGE_GAP = 6.0
+EDGE = 0.15
 
 
 def span_style(font, text):
@@ -21,71 +23,73 @@ def span_style(font, text):
     return text
 
 
-def page_spans(page):
-    spans = []
+def page_units(page):
+    units = []
     for block in page.get_text("rawdict")["blocks"]:
         if block["type"] != 0:
             continue
         for line in block["lines"]:
-            for span in line["spans"]:
-                chars = [c for c in span["chars"] if c["c"]]
-                if chars:
-                    spans.append({"y0": span["bbox"][1], "y1": span["bbox"][3],
-                                  "x0": span["bbox"][0], "x1": span["bbox"][2],
-                                  "font": span["font"], "size": span["size"], "chars": chars})
-    return sorted(spans, key=lambda s: (s["y0"], s["x0"]))
+            spans = [{"y0": s["bbox"][1], "y1": s["bbox"][3], "x0": s["bbox"][0],
+                      "x1": s["bbox"][2], "font": s["font"], "size": s["size"],
+                      "chars": [c for c in s["chars"] if c["c"]]} for s in line["spans"]]
+            spans = [s for s in spans if s["chars"]]
+            if spans:
+                units.append({"y0": line["bbox"][1], "y1": line["bbox"][3],
+                              "x0": min(s["x0"] for s in spans),
+                              "x1": max(s["x1"] for s in spans), "spans": spans})
+    return sorted(units, key=lambda u: (u["y0"], u["x0"]))
 
 
-def kept_chars(spans):
-    out = []
-    covered = None
-    baseline = None
-    for span in spans:
-        if baseline is None or abs(span["y0"] - baseline) > BASELINE:
-            baseline, covered = span["y0"], None
-        if covered is not None and span["x1"] <= covered + TOLERANCE:
-            continue
-        chars = span["chars"]
-        if covered is not None:
-            chars = [c for c in chars if c["bbox"][0] >= covered - TOLERANCE]
+def is_duplicate(char, placed):
+    x0 = char["bbox"][0]
+    return any(abs(p[0] - x0) <= TOLERANCE and p[2] == char["c"] for p in placed)
+
+
+def dedup_units(units):
+    kept, placed, baseline = [], [], None
+    for unit in units:
+        if baseline is None or abs(unit["y0"] - baseline) > BASELINE:
+            baseline, placed = unit["y0"], []
+        spans = []
+        for span in sorted(unit["spans"], key=lambda s: s["x0"]):
+            chars = [c for c in span["chars"] if not is_duplicate(c, placed)]
             if not chars:
                 continue
-        covered = span["x1"] if covered is None else max(covered, span["x1"])
-        out.extend({"c": c["c"], "x0": c["bbox"][0], "x1": c["bbox"][2], "y0": span["y0"],
-                    "y1": span["y1"], "font": span["font"], "size": span["size"]} for c in chars)
-    return sorted(out, key=lambda ch: (ch["y0"], ch["x0"]))
+            placed.extend((c["bbox"][0], c["bbox"][2], c["c"]) for c in chars)
+            spans.append({"x0": span["x0"], "x1": span["x1"],
+                          "text": "".join(c["c"] for c in chars),
+                          "font": span["font"], "size": span["size"]})
+        if spans:
+            unit = dict(unit, spans=spans, x0=min(s["x0"] for s in spans))
+            kept.append(unit)
+    return kept
 
 
-def group_lines(chars):
-    lines = []
-    for ch in chars:
-        if lines and abs(ch["y0"] - lines[-1]["y0"]) <= BASELINE:
-            lines[-1]["chars"].append(ch)
+def join_adjacent(units):
+    out = []
+    for unit in units:
+        previous = out[-1] if out else None
+        if (previous and abs(unit["y0"] - previous["y0"]) <= BASELINE
+                and unit["x0"] - previous["x1"] < MERGE_GAP):
+            previous["spans"].extend(unit["spans"])
+            previous["x1"] = max(previous["x1"], unit["x1"])
+            previous["y1"] = max(previous["y1"], unit["y1"])
         else:
-            lines.append({"y0": ch["y0"], "x0": ch["x0"], "chars": [ch]})
-    return lines
+            out.append(unit)
+    return out
 
 
-def line_record(group):
-    runs = []
-    previous = None
-    for ch in group["chars"]:
-        if previous is not None and ch["x0"] - previous > TOLERANCE:
-            runs.append([None, " "])
-        if runs and runs[-1][0] == ch["font"]:
-            runs[-1][1] += ch["c"]
-        else:
-            runs.append([ch["font"], ch["c"]])
-        previous = ch["x1"]
-    text = re.sub(r"\s+", " ", "".join(span_style(f, t) if f else " " for f, t in runs)).strip()
-    return {"x0": group["x0"], "y0": group["y0"], "size": max(c["size"] for c in group["chars"]),
-           "y1": max(c["y1"] for c in group["chars"]), "text": text}
+def line_record(unit):
+    text = re.sub(r"\s+", " ", " ".join(
+        span_style(span["font"], span["text"]) for span in unit["spans"])).strip()
+    return {"x0": unit["x0"], "y0": unit["y0"], "y1": unit["y1"],
+           "size": max(span["size"] for span in unit["spans"]), "text": text}
 
 
 def page_lines(page, drop=()):
     lines = []
-    for group in group_lines(kept_chars(page_spans(page))):
-        line = line_record(group)
+    for unit in join_adjacent(dedup_units(page_units(page))):
+        line = line_record(unit)
         if not line["text"] or FOOTER_RE.match(line["text"].strip("*").lower()):
             continue
         if line["text"] in drop:
@@ -94,17 +98,13 @@ def page_lines(page, drop=()):
     return lines
 
 
-EDGE = 0.15
-
-
 def at_edge(line, page):
     height = page.rect.height
     return line["y0"] / height < EDGE or line["y1"] / height > 1 - EDGE
 
 
 def repeated_texts(doc):
-    counts = {}
-    pages = 0
+    counts, pages = {}, 0
     for page in doc:
         lines = page_lines(page)
         if not lines:
@@ -133,6 +133,7 @@ def merge_wrapped(lines):
                 "x0": line["x0"],
                 "y0": line["y0"],
                 "y1": lines[i + 1]["y1"],
+                "size": max(line["size"], lines[i + 1]["size"]),
                 "text": f"{number.group(1)} {lines[i + 1]['text']}",
             })
             i += 2
@@ -144,6 +145,7 @@ def merge_wrapped(lines):
                 "x0": line["x0"],
                 "y0": line["y0"],
                 "y1": nxt["y1"],
+                "size": max(line["size"], nxt["size"]),
                 "text": line["text"] + nxt["text"],
             })
             i += 2

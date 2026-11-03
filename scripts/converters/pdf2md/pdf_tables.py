@@ -11,8 +11,8 @@ def cluster(values, tol=6.0):
     return [round((a + b) / 2, 2) for a, b in anchors]
 
 
-def column_of(x0, anchors):
-    return min(range(len(anchors)), key=lambda i: abs(anchors[i] - x0))
+def index_of(value, anchors):
+    return min(range(len(anchors)), key=lambda i: abs(anchors[i] - value))
 
 
 def inside(line, bbox):
@@ -23,83 +23,54 @@ def region_indices(lines, bbox, skip):
     return [i for i, line in enumerate(lines) if i not in skip and inside(line, bbox)]
 
 
-def cells_from_lines(lines, indices, anchors):
-    by_col = [[] for _ in anchors]
-    for index in indices:
-        by_col[column_of(lines[index]["x0"], anchors)].append(index)
-    cells = []
-    for col, col_lines in enumerate(by_col):
-        current = None
-        for index in sorted(col_lines, key=lambda i: lines[i]["y0"]):
-            line = lines[index]
-            if current and line["y0"] - current["last"] < 15.0:
-                glue = "" if current["text"].endswith("-") else " "
-                current["text"] = f"{current['text']}{glue}{line['text']}".strip()
-                current["y1"] = line["y1"]
-                current["last"] = line["y0"]
-                current["lines"].append(index)
-            else:
-                current = {"col": col, "y0": line["y0"], "y1": line["y1"],
-                           "last": line["y0"], "text": line["text"], "lines": [index]}
-                cells.append(current)
-    return cells
+def cell_text(lines, indices):
+    ordered = sorted(indices, key=lambda i: (lines[i]["y0"], lines[i]["x0"]))
+    return re.sub(r"\s+", " ", " ".join(lines[i]["text"] for i in ordered)).strip()
 
 
-def rows_from_cells(cells):
-    rows = []
-    for cell in sorted(cells, key=lambda c: c["y0"]):
-        if rows and cell["y0"] - rows[-1]["y0"] <= 12.0:
-            rows[-1]["cells"][cell["col"]] = cell
-        else:
-            rows.append({"y0": cell["y0"], "cells": {cell["col"]: cell}})
-    return [row for row in rows if len(row["cells"]) >= 2]
+def grid_from_cells(lines, table, skip):
+    cells, used = [], set()
+    for rect in table.cells:
+        if not rect:
+            continue
+        indices = [i for i in region_indices(lines, rect, skip) if i not in used]
+        if not indices:
+            continue
+        used.update(indices)
+        cells.append({"x0": rect[0], "y0": rect[1], "text": cell_text(lines, indices)})
+    if not cells:
+        return {}, 0, 0, used
+    xs = cluster([cell["x0"] for cell in cells])
+    ys = cluster([cell["y0"] for cell in cells])
+    grid = {}
+    for cell in cells:
+        key = (index_of(cell["y0"], ys), index_of(cell["x0"], xs))
+        if len(grid.get(key, "")) < len(cell["text"]):
+            grid[key] = cell["text"]
+    return grid, len(ys), len(xs), used
 
 
-def markdown_table(rows, ncols):
-    used = [c for c in range(ncols) if any(c in row["cells"] for row in rows)]
-
-    def cells(row):
-        return " | ".join(
-            row["cells"].get(c, {}).get("text", "").replace("|", "\\|") for c in used
-        )
-
-    lines = [f"| {cells(rows[0])} |", "| " + " | ".join(["---"] * len(used)) + " |"]
-    lines += [f"| {cells(row)} |" for row in rows[1:]]
-    return "\n".join(lines)
-
-
-def table_from_bbox(lines, bbox, skip):
-    indices = region_indices(lines, bbox, skip)
-    anchors = cluster([lines[index]["x0"] for index in indices])
-    if len(anchors) < 2:
-        return None, set()
-    rows = rows_from_cells(cells_from_lines(lines, indices, anchors))
-    if len(rows) < 3:
-        return None, set()
-    consumed = {index for row in rows for cell in row["cells"].values() for index in cell["lines"]}
-    return markdown_table(rows, len(anchors)), consumed
-
-
-def table_markdown(table):
-    try:
-        rows = table.extract()
-    except (AttributeError, TypeError, NotImplementedError):
-        return ""
-    rows = [["" if cell is None else re.sub(r"\s+", " ", str(cell)).strip()
-             for cell in row] for row in rows]
-    if len(rows) < 2:
-        return ""
-    used = [i for i in range(len(rows[0])) if any(row[i] for row in rows)]
+def markdown_table(grid, nrows, ncols):
+    used = [c for c in range(ncols) if any(grid.get((r, c)) for r in range(nrows))]
     if len(used) < 2:
+        return ""
+    rows = [[grid.get((r, c), "") for c in used] for r in range(nrows)]
+    rows = [row for row in rows if any(row)]
+    if len(rows) < 2:
         return ""
 
     def cells(row):
         return "| " + " | ".join(cell.replace("|", "\\|") for cell in row) + " |"
 
-    header = cells([rows[0][i] for i in used])
-    lines = [header, "| " + " | ".join(["---"] * len(used)) + " |"]
-    lines += [cells([row[i] for i in used]) for row in rows[1:]]
-    return "\n".join(lines)
+    return "\n".join([cells(rows[0]), "| " + " | ".join(["---"] * len(used)) + " |"]
+                     + [cells(row) for row in rows[1:]])
+
+
+def table_markdown(lines, table, skip):
+    grid, nrows, ncols, used = grid_from_cells(lines, table, skip)
+    if not grid:
+        return "", set()
+    return markdown_table(grid, nrows, ncols), used
 
 
 def page_tables(page, lines, skip):
@@ -108,11 +79,7 @@ def page_tables(page, lines, skip):
         indices = region_indices(lines, table.bbox, skip)
         if len(indices) < 2:
             continue
-        markdown = table_markdown(table)
-        if markdown:
-            tables.append((markdown, set(indices)))
-            continue
-        markdown, consumed = table_from_bbox(lines, table.bbox, skip)
+        markdown, consumed = table_markdown(lines, table, skip)
         if markdown:
             tables.append((markdown, consumed))
     return tables
