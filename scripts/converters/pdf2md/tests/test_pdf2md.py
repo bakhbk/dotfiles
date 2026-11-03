@@ -3,8 +3,8 @@ from pathlib import Path
 import pymupdf
 
 from pdf2md import convert, resolve_output
-from pdf_lines import page_lines, repeated_texts
-from pdf_outline import heading_levels
+from pdf_lines import page_lines
+from pdf_outline import heading_levels, repeated_texts
 from pdf_tables import markdown_table, page_tables
 
 

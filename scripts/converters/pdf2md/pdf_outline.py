@@ -1,7 +1,7 @@
 import re
 from collections import Counter
 
-from pdf_lines import page_lines
+from pdf_lines import EDGE, MAX_TITLE_LEN, page_lines
 
 HEAD_MARK = {1: 2, 2: 3, 3: 4, 4: 5, 5: 6, 6: 6}
 NUMBERED = re.compile(r"^\d+(?:\.\d+)*\.?\s")
@@ -73,3 +73,26 @@ def match_heading(line, page_heads, used):
             name = title if len(target) >= len(text) else body
             return HEAD_MARK.get(level, 6), name
     return None
+
+def at_edge(line, page):
+    height = page.rect.height
+    return line["y0"] / height < EDGE or line["y1"] / height > 1 - EDGE
+
+
+def repeated_texts(doc):
+    counts, pages = {}, 0
+    for page in doc:
+        lines = page_lines(page)
+        if not lines:
+            continue
+        pages += 1
+        seen = set()
+        for line in lines:
+            text = line["text"]
+            if len(text) < MAX_TITLE_LEN and at_edge(line, page) and text not in seen:
+                seen.add(text)
+                counts[text] = counts.get(text, 0) + 1
+    if pages < 3:
+        return frozenset()
+    threshold = max(3, pages * 0.6)
+    return frozenset(text for text, count in counts.items() if count >= threshold)

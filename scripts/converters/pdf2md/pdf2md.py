@@ -9,13 +9,7 @@ from pathlib import Path
 import pymupdf
 
 from pdf_images import gather_images
-from pdf_lines import (
-    DOT_LEADER_RE,
-    is_toc_page,
-    merge_wrapped,
-    page_lines,
-    repeated_texts,
-)
+from pdf_lines import DOT_LEADER_RE, is_toc_page, merge_wrapped, page_lines
 from pdf_outline import (
     BULLET_RE,
     heading_levels,
@@ -23,6 +17,7 @@ from pdf_outline import (
     match_heading,
     normalize,
     outline,
+    repeated_texts,
     size_heading,
     strip_marks,
 )
